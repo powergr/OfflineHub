@@ -1,0 +1,10 @@
+# Offline School Knowledge Hub — Python dependencies
+# Install with: pip install -r requirements.txt
+
+customtkinter>=5.2.2
+requests>=2.31.0
+flask>=3.0.0
+werkzeug>=3.0.0
+bcrypt>=4.1.0          # used via hashlib.pbkdf2_hmac — bcrypt kept for reference
+pywin32>=306           # Windows registry + service registration
+pyinstaller>=6.3.0     # EXE builder (dev only, not needed at runtime)
