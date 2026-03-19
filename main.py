@@ -16,36 +16,14 @@ CONFIG_PATH  = os.path.join(BASE_DIR, "config.json")
 for d in (BASE_DIR, MODULES_DIR, BIN_DIR):
     os.makedirs(d, exist_ok=True)
 
-# ── Extract vendor binaries on first run ─────────────────────────────────────
-def extract_vendor():
-    r"""Copy bundled vendor binaries to C:\OfflineHub\bin if not already there."""
-    if getattr(sys, "frozen", False):
-        # Running as PyInstaller EXE — _MEIPASS holds the extracted bundle
-        vendor_src = os.path.join(sys._MEIPASS, "vendor")
-    else:
-        vendor_src = os.path.join(os.path.dirname(__file__), "vendor")
-
-    if not os.path.isdir(vendor_src):
-        return
-
-    for item in os.listdir(vendor_src):
-        src  = os.path.join(vendor_src, item)
-        dest = os.path.join(BIN_DIR, item)
-        if not os.path.exists(dest):
-            if os.path.isdir(src):
-                from shutil import copytree
-                copytree(src, dest)
-            else:
-                from shutil import copy2
-                copy2(src, dest)
-
-extract_vendor()
+# NOTE: extract_vendor() has been removed. 
+# The Setup.exe installer now securely handles placing vendor binaries into BIN_DIR.
 
 # ── Default config ────────────────────────────────────────────────────────────
 DEFAULT_CONFIG = {
     "first_run": True,
-    "version": "1.0.0",
-    "admin_password_hash": "",          # set during wizard
+    "version": "0.1.1",
+    "admin_password_hash": "",          
     "hotspot": {
         "ssid": "SchoolHub",
         "password": "schoolhub2024",
@@ -60,7 +38,6 @@ def load_config():
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, encoding="utf-8") as f:
             data = json.load(f)
-        # Merge missing keys from default
         for k, v in DEFAULT_CONFIG.items():
             data.setdefault(k, v)
         return data

@@ -10,6 +10,8 @@ from tkinter import messagebox
 
 from core.downloader import Downloader, CATALOGUE
 from core.hotspot    import HotspotManager
+from core.module_manager import ModuleManager
+from core.service_manager import ServiceManager
 
 
 STEPS = ["Welcome", "Content", "Hotspot", "Password", "Download", "Done"]
@@ -23,6 +25,10 @@ class SetupWizard(ctk.CTk):
         self.config      = config
         self.save_config = save_config
         self.downloader  = Downloader()
+        
+        # 🚀 Required to actually install modules after download finishes
+        self.service_mgr = ServiceManager()
+        self.module_mgr  = ModuleManager(self.service_mgr)
 
         # User selections
         self.selected_content: dict[str, ctk.BooleanVar] = {}
@@ -270,7 +276,12 @@ class SetupWizard(ctk.CTk):
                 def progress_cb(pct, _speed):
                     p.set(pct / 100)
                     v.set(f"{pct:.0f}%")
+                
                 def done_cb(success, path):
+                    # 🚀 ACTUALLY INSTALL THE CONTENT WHEN FINISHED!
+                    if success:
+                        self.module_mgr.install_from_download(key, item, path)
+                    
                     completed[i] = True
                     v.set("✓" if success else "✗")
                     if all(completed):
@@ -316,8 +327,6 @@ class SetupWizard(ctk.CTk):
     # ── Finish ────────────────────────────────────────────────────────────────
 
     def _finish(self):
-        # Hotspot values were already saved to self.config in _validate_step
-        # when the user clicked Next past the Hotspot step.
         self.config["first_run"] = False
         self.save_config(self.config)
         self.destroy()

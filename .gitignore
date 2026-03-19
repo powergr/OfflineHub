@@ -12,3 +12,8 @@ logs
 dist/
 build/
 __pycache__/
+
+#build
+Output/
+main.build/
+main.dist/

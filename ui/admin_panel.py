@@ -127,7 +127,6 @@ class AdminPanel(ctk.CTkToplevel):
         ).start()
 
     def _add_from_zip(self):
-        import zipfile, os
         zip_path = filedialog.askopenfilename(
             title="Select Module ZIP file",
             filetypes=[("ZIP files", "*.zip")]
@@ -135,33 +134,16 @@ class AdminPanel(ctk.CTkToplevel):
         if not zip_path:
             return
 
-        # Validate that the ZIP contains a manifest.json at its root or one level deep
         try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                names = zf.namelist()
-                manifest_entries = [n for n in names
-                                    if n.endswith("manifest.json")
-                                    and n.count("/") <= 1]
-                if not manifest_entries:
-                    messagebox.showerror(
-                        "Invalid Module",
-                        "The ZIP must contain a manifest.json file.\n"
-                        "See README for the required module structure."
-                    )
-                    return
-
-                from core.module_manager import MODULES_DIR
-                zf.extractall(MODULES_DIR)
-
+            # 🚀 Uses the new, smart extraction function from module_manager
+            self.module_mgr.install_from_zip(zip_path)
             self.refresh_cb()
-            messagebox.showinfo("Success", "Module installed successfully.")
-        except zipfile.BadZipFile:
-            messagebox.showerror("Error", "The selected file is not a valid ZIP archive.")
+            messagebox.showinfo("Success", "Module installed and started successfully.")
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            messagebox.showerror("Install Error", str(e))
 
     def _remove_module(self):
-        from main import MODULES_DIR
+        from core.module_manager import MODULES_DIR # 🚀 Safely imported to prevent Nuitka crash
         folder = filedialog.askdirectory(
             initialdir=MODULES_DIR, title="Select module to remove"
         )
@@ -175,7 +157,7 @@ class AdminPanel(ctk.CTkToplevel):
             messagebox.showerror("Error", str(e))
 
     # ══════════════════════════════════════════════════════════════════════════
-    # HOTSPOT TAB
+    # HOTSPOT TAB (unchanged logic)
     # ══════════════════════════════════════════════════════════════════════════
 
     def _build_hotspot_tab(self, tab):
@@ -185,7 +167,6 @@ class AdminPanel(ctk.CTkToplevel):
         ctk.CTkLabel(tab, text="Wi-Fi Hotspot",
                      font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(12, 8))
 
-        # ── Admin warning ─────────────────────────────────────────────────
         if not is_admin():
             warn = ctk.CTkFrame(tab, fg_color="#3a1a00", corner_radius=8)
             warn.pack(fill="x", padx=10, pady=(0, 10))
@@ -323,9 +304,9 @@ class AdminPanel(ctk.CTkToplevel):
         for w in self.svc_frame.winfo_children():
             w.destroy()
 
-        # Read all installed modules from disk
         import json, os
-        MODULES_DIR = r"C:\OfflineHub\modules"
+        from core.module_manager import MODULES_DIR # 🚀 Safer Nuitka import
+
         modules = []
         if os.path.isdir(MODULES_DIR):
             for folder in sorted(os.listdir(MODULES_DIR)):
@@ -352,7 +333,6 @@ class AdminPanel(ctk.CTkToplevel):
             row = ctk.CTkFrame(self.svc_frame, corner_radius=8)
             row.pack(fill="x", pady=4, padx=4)
 
-            # Left: emoji + name + port
             left = ctk.CTkFrame(row, fg_color="transparent")
             left.pack(side="left", fill="both", expand=True, padx=12, pady=8)
 
@@ -371,7 +351,6 @@ class AdminPanel(ctk.CTkToplevel):
                 text_color=status_color, anchor="w"
             ).pack(anchor="w")
 
-            # Right: buttons (only shown when running)
             if running:
                 right = ctk.CTkFrame(row, fg_color="transparent")
                 right.pack(side="right", padx=8, pady=8)
@@ -452,19 +431,16 @@ class AdminPanel(ctk.CTkToplevel):
         ).pack(pady=16)
 
     def _save_settings(self):
-        # Portal port
         try:
             self.config["portal_port"] = int(self.port_entry.get())
         except ValueError:
             messagebox.showerror("Error", "Port must be a number.")
             return
 
-        # Autostart
         self.config["autostart"] = bool(self.autostart_switch.get())
         if self.config["autostart"]:
             self._register_autostart()
 
-        # Password change
         p1, p2 = self.new_pw1.get(), self.new_pw2.get()
         if p1 or p2:
             if p1 != p2:
@@ -481,7 +457,6 @@ class AdminPanel(ctk.CTkToplevel):
         messagebox.showinfo("Saved", "Settings saved.")
 
     def _register_autostart(self):
-        """Add EXE to Windows registry Run key for autostart."""
         import sys, winreg
         try:
             key = winreg.OpenKey(

@@ -34,18 +34,101 @@ class ModuleManager:
                     with open(manifest_path, encoding="utf-8") as f:
                         data = json.load(f)
                     results.append((folder, data))
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Print the error so you can see if the JSON format is broken!
+                    print(f"[WARNING] Skipping module '{folder}': invalid manifest.json ({e})")
         return results
 
     # ── Install ───────────────────────────────────────────────────────────────
 
     def add_from_folder(self, src_folder: str):
-        name = os.path.basename(src_folder.rstrip("/\\"))
-        dest = os.path.join(MODULES_DIR, name)
+        # 1. Search for manifest.json
+        manifest_dir = None
+        for root, dirs, files in os.walk(src_folder):
+            if "manifest.json" in files:
+                manifest_dir = root
+                break
+
+        if not manifest_dir:
+            raise FileNotFoundError(f"Invalid module: 'manifest.json' not found inside the ZIP.")
+
+        # 2. Parse the manifest
+        manifest_path = os.path.join(manifest_dir, "manifest.json")
+        try:
+            with open(manifest_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            raise ValueError(f"manifest.json is corrupted or invalid JSON. Error: {e}")
+
+        # 3. Create a safe destination folder name
+        raw_name = data.get("name", os.path.basename(src_folder.rstrip("/\\")))
+        safe_name = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in raw_name).strip()
+        
+        dest = os.path.join(MODULES_DIR, safe_name)
         if os.path.exists(dest):
-            raise FileExistsError(f"Module '{name}' already exists.")
-        copytree(src_folder, dest)
+            raise FileExistsError(f"Module '{safe_name}' already exists.")
+
+        # 4. Copy the files
+        copytree(manifest_dir, dest)
+
+        # 🚀 NEW FIX: Automatically start the service so it appears in the Services Tab!
+        try:
+            self.launch_module(safe_name, data)
+        except Exception as e:
+            print(f"Module copied, but failed to start automatically: {e}")
+
+    def install_from_zip(self, zip_path: str):
+        """
+        Safely extracts a ZIP file, reads the manifest to get the module name,
+        creates a dedicated folder for it, and launches it.
+        """
+        import zipfile
+        import tempfile
+        import shutil
+
+        # 1. Extract to a safe temporary Windows folder first
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(temp_dir)
+
+            # 2. Find the manifest.json inside the temp folder (handles double-folder zips)
+            manifest_dir = None
+            for root, dirs, files in os.walk(temp_dir):
+                if "manifest.json" in files:
+                    manifest_dir = root
+                    break
+
+            if not manifest_dir:
+                raise FileNotFoundError("Invalid ZIP: 'manifest.json' not found inside.")
+
+            # 3. Read the manifest to get the module's name
+            manifest_path = os.path.join(manifest_dir, "manifest.json")
+            try:
+                with open(manifest_path, encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception as e:
+                raise ValueError(f"manifest.json is corrupted or invalid JSON. Error: {e}")
+
+            # 4. Create a safe folder name based on the manifest name
+            raw_name = data.get("name", "Custom Module")
+            safe_name = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in raw_name).strip()
+            
+            dest = os.path.join(MODULES_DIR, safe_name)
+            if os.path.exists(dest):
+                raise FileExistsError(f"Module '{safe_name}' is already installed.")
+
+            # 5. Move the clean files to their new permanent home
+            shutil.copytree(manifest_dir, dest)
+
+            # 6. Ensure kiwix-serve.exe is copied if needed
+            if data.get("type", "kiwix") == "kiwix":
+                self._ensure_kiwix(dest)
+
+            # 7. Automatically start the service!
+            try:
+                self.launch_module(safe_name, data)
+            except Exception as e:
+                print(f"Module installed, but failed to start automatically: {e}")
 
     def install_from_download(self, key: str, item: dict, downloaded_path: str):
         """

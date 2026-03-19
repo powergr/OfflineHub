@@ -14,9 +14,14 @@ from flask import Flask, render_template_string, jsonify, send_from_directory
 
 from core.tileserver import TileServer
 
-# Resolve asset path whether running frozen (PyInstaller) or from source
+# Resolve asset path whether running frozen (PyInstaller/Nuitka) or from source
 if getattr(sys, "frozen", False):
-    ASSETS_DIR = os.path.join(sys._MEIPASS, "assets", "portal")
+    if hasattr(sys, "_MEIPASS"):
+        # Legacy PyInstaller compatibility
+        ASSETS_DIR = os.path.join(sys._MEIPASS, "assets", "portal")
+    else:
+        # Nuitka compatibility: assets are next to the .exe
+        ASSETS_DIR = os.path.join(os.path.dirname(sys.executable), "assets", "portal")
 else:
     ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "assets", "portal")
 

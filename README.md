@@ -1,4 +1,4 @@
-# Offline School Knowledge Hub
+# Offline Knowledge Hub
 
 A self-contained Windows application that serves Wikipedia, Khan Academy,
 Project Gutenberg, and OpenStreetMap to students over a local Wi-Fi hotspot
@@ -12,8 +12,9 @@ or LAN — no internet required after setup.
 hub/
 ├── main.py                  # Entry point — first-run detection + launch
 ├── requirements.txt
-├── hub.spec                 # PyInstaller build spec → produces OfflineHub.exe
-├── config.json              # Default config (copied to C:\OfflineHub on first run)
+├── build.bat                # 1-click build script (Nuitka + Inno Setup)
+├── installer.iss            # Inno Setup configuration script
+├── config.json              # Default config (installed to C:\OfflineHub)
 │
 ├── ui/
 │   ├── app.py               # Main CTk window
@@ -47,8 +48,9 @@ hub/
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 
-# 2. Install dependencies
+# 2. Install dependencies (including Nuitka for building)
 pip install -r requirements.txt
+pip install nuitka
 
 # 3. Run from source
 python main.py
@@ -58,7 +60,7 @@ python main.py
 
 ## Adding Vendor Binaries
 
-Before building the EXE, download the required binaries into `vendor/`:
+Before building the Setup package, download the required binaries into `vendor/`:
 
 | File              | Source                                                                            |
 | ----------------- | --------------------------------------------------------------------------------- |
@@ -71,29 +73,43 @@ through Kolibri's channel system. Khan Academy is also available as a Kiwix ZIM
 
 ---
 
-## Building the EXE
+## Building the Installer
+
+To avoid Antivirus false-positives (common with PyInstaller), this project uses **Nuitka** to compile the Python code into standard C executables, and **Inno Setup** to package everything into a professional Windows Installer (`.exe`).
+
+### Prerequisites for Building
+
+1. **Nuitka & C Compiler**: Installed via `pip install nuitka`. (Nuitka will prompt you to download a MinGW compiler the first time it runs).
+2. **Inno Setup 6**: Download and install from [jrsoftware.org](https://jrsoftware.org/isdl.php). Ensure it installs to `C:\Program Files (x86)\Inno Setup 6\`.
+
+### Build Process
+
+Simply double-click the **`build.bat`** file in the project root, or run it from the terminal:
 
 ```powershell
-# Install UPX for compression (optional but recommended)
-# Download from https://github.com/upx/upx/releases and add to PATH
-
-# Build
-pyinstaller hub.spec --clean
-
-# Output: dist\OfflineHub.exe
+.\build.bat
 ```
 
-The resulting `OfflineHub.exe` is fully self-contained.
-Distribute just that single file — no Python or dependencies needed on target machines.
+**What the build script does:**
 
-### First Run on a New Machine
+1. Compiles `main.py` and its dependencies into a native Windows application folder (`main.dist`).
+2. Triggers Inno Setup to bundle `main.dist`, your `assets/`, `config.json`, and `vendor/` binaries into a single, compressed installer.
+3. Outputs **`OfflineHub_Setup.exe`** into an `Output/` folder.
 
-1. Double-click `OfflineHub.exe`.
-2. The setup wizard launches automatically.
-3. Choose content to download (requires internet on first run only).
-4. Set hotspot SSID / password and admin password.
-5. Wait for downloads to complete (large files — plan for hours on slow connections).
-6. Done. Students connect to the hotspot and open any browser.
+You only need to distribute `OfflineHub_Setup.exe`. No Python or dependencies are needed on target machines.
+
+---
+
+### Installation & First Run on a New Machine
+
+1. Double-click `OfflineHub_Setup.exe`.
+2. Follow the standard Windows installation prompts (Installs safely to `C:\OfflineHub`).
+3. Launch "School Hub" from the newly created Desktop or Start Menu shortcut.
+4. The setup wizard launches automatically on the first run.
+5. Choose content to download (requires internet on first run only).
+6. Set hotspot SSID / password and admin password.
+7. Wait for downloads to complete (large files — plan for hours on slow connections).
+8. Done. Students connect to the hotspot and open any browser.
 
 ---
 
