@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>School Knowledge Hub</title>
+    <title>Offline Knowledge Hub</title>
     <style>
       /* ── Fonts (self-hosted subset via Google Fonts CSS import is intentionally
         omitted for offline use; we fall back to a refined system stack) ── */
@@ -287,10 +287,10 @@
 
   <body>
     <header>
-      <p class="eyebrow">🏫 Offline School Knowledge Hub</p>
+      <p class="eyebrow">🏫 Offline Knowledge Hub</p>
       <h1>Everything you need,<br />no internet required.</h1>
       <p class="subtitle">
-        Connect to the <strong id="ssid-display">SchoolHub</strong> network,
+        Connect to the <strong id="ssid-display">OfflineHub</strong> network,
         open this page in any browser, and explore.
       </p>
     </header>
@@ -313,8 +313,8 @@
     </main>
 
     <footer>
-      Offline School Knowledge Hub &nbsp;·&nbsp; Running locally &nbsp;·&nbsp;
-      No data leaves this network.
+      Offline Knowledge Hub &nbsp;·&nbsp; Running locally &nbsp;·&nbsp; No data
+      leaves this network.
     </footer>
 
     <script>
@@ -348,7 +348,7 @@
         const entries = Object.entries(modules);
         if (entries.length === 0) {
           container.innerHTML = `<p style="color: var(--muted); grid-column:1/-1">
-         No modules installed yet. Ask your teacher to set up content.
+         No modules installed yet. Ask the administrator to set up content.
        </p>`;
           return;
         }

@@ -1,7 +1,7 @@
 [Setup]
-AppName=Offline School Knowledge Hub
-AppVersion=1.0.0
-AppPublisher=School Hub Team
+AppName=Offline Knowledge Hub
+AppVersion=0.1.2
+AppPublisher=Offline Hub Team
 DefaultDirName=C:\OfflineHub
 DisableProgramGroupPage=yes
 OutputBaseFilename=OfflineHub_Setup
@@ -33,9 +33,9 @@ Source: "config.json"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; Create Desktop and Start Menu shortcuts
-Name: "{commondesktop}\School Hub"; Filename: "{app}\main.exe"; IconFilename: "{app}\assets\icons\hub.ico"
-Name: "{commonprograms}\School Hub"; Filename: "{app}\main.exe"; IconFilename: "{app}\assets\icons\hub.ico"
+Name: "{commondesktop}\Offline Hub"; Filename: "{app}\main.exe"; IconFilename: "{app}\assets\icons\hub.ico"
+Name: "{commonprograms}\Offline Hub"; Filename: "{app}\main.exe"; IconFilename: "{app}\assets\icons\hub.ico"
 
 [Run]
 ; Option to launch the app immediately after installation
-Filename: "{app}\main.exe"; Description: "{cm:LaunchProgram,Offline School Knowledge Hub}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\main.exe"; Description: "{cm:LaunchProgram,Offline Knowledge Hub}"; Flags: nowait postinstall skipifsilent

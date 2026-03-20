@@ -27,4 +27,3 @@ echo.
 echo ===================================================
 echo Build Complete! Look for your new Setup.exe in the Output folder.
 echo ===================================================
-pause

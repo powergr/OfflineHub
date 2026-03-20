@@ -1,5 +1,5 @@
 """
-Offline School Knowledge Hub — Entry Point
+Offline Knowledge Hub — Entry Point
 Handles first-run detection and launches the correct UI flow.
 """
 
@@ -22,11 +22,11 @@ for d in (BASE_DIR, MODULES_DIR, BIN_DIR):
 # ── Default config ────────────────────────────────────────────────────────────
 DEFAULT_CONFIG = {
     "first_run": True,
-    "version": "0.1.1",
+    "version": "0.1.2",
     "admin_password_hash": "",          
     "hotspot": {
-        "ssid": "SchoolHub",
-        "password": "schoolhub2024",
+        "ssid": "OfflineHub",
+        "password": "offlinehub2026",
         "enabled": False
     },
     "portal_port": 8000,

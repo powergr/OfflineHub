@@ -52,7 +52,7 @@ CATALOGUE: dict[str, dict] = {
     },
     "osm_europe": {
         "name":        "OpenStreetMap — Europe",
-        "emoji":       "🗺️",
+        "emoji":       "📖",
         "description": "Offline vector map tiles for all of Europe.",
         "url":         "https://download.openfreemap.org/planet/2024-11-07/tiles/europe.mbtiles",
         "dest":        os.path.join(MODULES_DIR, "osm_europe", "content", "europe.mbtiles"),

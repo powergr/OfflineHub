@@ -128,7 +128,7 @@ class SetupWizard(ctk.CTk):
             self._container,
             text=(
                 "This wizard will guide you through setting up your\n"
-                "local knowledge server. Once configured, students can\n"
+                "local knowledge server. Once configured, users can\n"
                 "access Wikipedia, Khan Academy, books, and maps\n"
                 "entirely offline — no internet required.\n\n"
                 "Estimated disk space requirements:\n"
@@ -189,7 +189,7 @@ class SetupWizard(ctk.CTk):
 
         ctk.CTkLabel(
             self._container,
-            text="Students connect to this network and open any browser\n"
+            text="Users connect to this network and open any browser\n"
                  "to reach the hub. Settings can be changed later.",
             font=ctk.CTkFont(size=12),
             text_color="#888",
@@ -316,7 +316,7 @@ class SetupWizard(ctk.CTk):
             self._container,
             text=(
                 f"Your hub is ready.\n\n"
-                f"Students can access it at:\n"
+                f"Users can access it at:\n"
                 f"  http://{ip}:{port}\n\n"
                 f"Use  Ctrl + Shift + A  to open the Admin Panel at any time."
             ),
