@@ -166,7 +166,22 @@ class OfflineHub(ctk.CTk):
     # ── Shutdown ──────────────────────────────────────────────────────────────
 
     def _on_close(self):
-        self.service_mgr.stop_all()
+        # 1. Stop the hotspot gracefully (so Windows networking doesn't get stuck)
         self.hotspot_mgr.stop()
-        self.portal.stop()
-        self.destroy()
+        
+        # 2. Instantly kill all background services and their hidden child processes
+        import subprocess
+        for name, entry in self.service_mgr._services.items():
+            if entry.process:
+                try:
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(entry.process.pid)],
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                except Exception:
+                    pass
+
+        # 3. Instantly kill the Python app (bypasses Flask's waiting period)
+        import os
+        os._exit(0)

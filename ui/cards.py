@@ -99,7 +99,17 @@ class ModuleCard(ctk.CTkFrame):
         if err:
             self.after(0, lambda: self._show_error(err))
         elif port:
-            webbrowser.open(f"http://127.0.0.1:{port}")
+            # 🚀 FIX: If it is an mbtiles map, route it to the main Flask Portal!
+            if self.data.get("type") == "mbtiles":
+                # We fetch the main portal port from the Service Manager's parent config
+                portal_port = self.service_mgr._services.get(self.folder).port if self.service_mgr._services.get(self.folder) else 8000
+                # Actually, the safest way is to just grab it from the app's config.
+                # Since we don't have direct access to config here, we just hardcode 8000 
+                # or read the portal URL. For safety, we open the root localhost.
+                webbrowser.open("http://127.0.0.1:8000")
+            else:
+                webbrowser.open(f"http://127.0.0.1:{port}")
+                
         self.after(0, lambda: self.open_btn.configure(
             state="normal", text="🌐  Open"
         ))

@@ -25,7 +25,7 @@ class AdminPanel(ctk.CTkToplevel):
         self.downloader  = Downloader()
 
         self.title("⚙️  Admin Panel")
-        self.geometry("780x580")
+        self.geometry("780x620")
         self.grab_set()
         self.after(50, self.lift)
 
@@ -73,7 +73,6 @@ class AdminPanel(ctk.CTkToplevel):
             prog.set(0)
             prog.pack(side="right", padx=6)
 
-            # Rebind button now that prog and pct_var exist
             row.winfo_children()[0].configure(
                 command=lambda k=key, p=prog, v=pct_var: self._start_download(k, p, v)
             )
@@ -85,6 +84,29 @@ class AdminPanel(ctk.CTkToplevel):
                 anchor="w"
             ).pack(side="left", fill="x", expand=True)
 
+        ctk.CTkFrame(tab, height=1, fg_color="#30363d").pack(fill="x", pady=12)
+
+        # ── Map Providers ────────────────────────────────────────────────────
+        ctk.CTkLabel(
+            tab, text="🗺️ Get Offline Maps",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(anchor="w", pady=(0, 4))
+        
+        map_row = ctk.CTkFrame(tab, fg_color="transparent")
+        map_row.pack(fill="x", pady=4)
+        
+        import webbrowser
+        ctk.CTkButton(
+            map_row, text="Draw Custom Map (BBBike)", width=180,
+            command=lambda: webbrowser.open("https://extract.bbbike.org/")
+        ).pack(side="left", padx=(0, 10))
+
+        ctk.CTkButton(
+            map_row, text="Download Countries (MapTiler)", width=180,
+            fg_color="#334", hover_color="#445",
+            command=lambda: webbrowser.open("https://data.maptiler.com/downloads/europe/")
+        ).pack(side="left")
+        
         ctk.CTkFrame(tab, height=1, fg_color="#30363d").pack(fill="x", pady=12)
 
         # ── Manual add ───────────────────────────────────────────────────────
@@ -129,35 +151,42 @@ class AdminPanel(ctk.CTkToplevel):
     def _add_from_zip(self):
         zip_path = filedialog.askopenfilename(
             title="Select Module ZIP file",
-            filetypes=[("ZIP files", "*.zip")]
+            filetypes=[("ZIP files", "*.zip")],
+            parent=self
         )
         if not zip_path:
             return
 
-        try:
-            # 🚀 Uses the new, smart extraction function from module_manager
-            self.module_mgr.install_from_zip(zip_path)
-            self.refresh_cb()
-            messagebox.showinfo("Success", "Module installed and started successfully.")
-        except Exception as e:
-            messagebox.showerror("Install Error", str(e))
+        def run_install():
+            try:
+                self.module_mgr.install_from_zip(zip_path)
+                self.after(0, self.refresh_cb)
+                self.after(0, lambda: messagebox.showinfo("Success", "Module installed successfully.", parent=self))
+            except Exception as e:
+                import traceback
+                with open(r"C:\OfflineHub\debug_log.txt", "a", encoding="utf-8") as f:
+                    f.write(traceback.format_exc() + "\n")
+                self.after(0, lambda err=e: messagebox.showerror("Install Error", str(err), parent=self))
+
+        import threading
+        threading.Thread(target=run_install, daemon=True).start()
 
     def _remove_module(self):
-        from core.module_manager import MODULES_DIR # 🚀 Safely imported to prevent Nuitka crash
+        from core.module_manager import MODULES_DIR
         folder = filedialog.askdirectory(
-            initialdir=MODULES_DIR, title="Select module to remove"
+            initialdir=MODULES_DIR, title="Select module to remove", parent=self
         )
         if not folder:
             return
         try:
             self.module_mgr.remove(folder)
             self.refresh_cb()
-            messagebox.showinfo("Removed", "Module deleted.")
+            messagebox.showinfo("Removed", "Module deleted.", parent=self)
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            messagebox.showerror("Error", str(e), parent=self)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # HOTSPOT TAB (unchanged logic)
+    # HOTSPOT TAB
     # ══════════════════════════════════════════════════════════════════════════
 
     def _build_hotspot_tab(self, tab):
@@ -243,7 +272,7 @@ class AdminPanel(ctk.CTkToplevel):
         self.config["hotspot"]["ssid"]     = self.ssid_entry.get()
         self.config["hotspot"]["password"] = self.pw_entry.get()
         self.save_config(self.config)
-        messagebox.showinfo("Saved", "Hotspot settings saved.")
+        messagebox.showinfo("Saved", "Hotspot settings saved.", parent=self)
 
     def _toggle_hotspot(self):
         if self.hotspot_mgr.is_running():
@@ -253,7 +282,7 @@ class AdminPanel(ctk.CTkToplevel):
             ok, msg = self.hotspot_mgr.start()
             self.config["hotspot"]["enabled"] = ok
             if not ok:
-                messagebox.showerror("Hotspot Error", msg)
+                messagebox.showerror("Hotspot Error", msg, parent=self)
         self.save_config(self.config)
         self._refresh_hs_status()
 
@@ -305,9 +334,9 @@ class AdminPanel(ctk.CTkToplevel):
             w.destroy()
 
         import json, os
-        from core.module_manager import MODULES_DIR # 🚀 Safer Nuitka import
+        from core.module_manager import MODULES_DIR
 
-        modules = []
+        modules =[]
         if os.path.isdir(MODULES_DIR):
             for folder in sorted(os.listdir(MODULES_DIR)):
                 manifest_path = os.path.join(MODULES_DIR, folder, "manifest.json")
@@ -434,7 +463,7 @@ class AdminPanel(ctk.CTkToplevel):
         try:
             self.config["portal_port"] = int(self.port_entry.get())
         except ValueError:
-            messagebox.showerror("Error", "Port must be a number.")
+            messagebox.showerror("Error", "Port must be a number.", parent=self)
             return
 
         self.config["autostart"] = bool(self.autostart_switch.get())
@@ -454,7 +483,7 @@ class AdminPanel(ctk.CTkToplevel):
             ).hex()
 
         self.save_config(self.config)
-        messagebox.showinfo("Saved", "Settings saved.")
+        messagebox.showinfo("Saved", "Settings saved.", parent=self)
 
     def _register_autostart(self):
         import sys, winreg
@@ -468,4 +497,4 @@ class AdminPanel(ctk.CTkToplevel):
                               sys.executable)
             winreg.CloseKey(key)
         except Exception as e:
-            messagebox.showwarning("Autostart", f"Could not register autostart: {e}")
+            messagebox.showwarning("Autostart", f"Could not register autostart: {e}", parent=self)

@@ -4,6 +4,8 @@ A self-contained Windows application that serves Wikipedia, Khan Academy,
 Project Gutenberg, and OpenStreetMap to students over a local Wi-Fi hotspot
 or LAN — no internet required after setup.
 
+The project is **WORK IN PROGRESS**. v0.1.3
+
 ---
 
 ## Project Structure
@@ -47,13 +49,14 @@ hub/
 # 1. Create a virtual environment
 python -m venv .venv
 .venv\Scripts\Activate.ps1
+or source .venv/Scripts/activate
 
 # 2. Install dependencies (including Nuitka for building)
 pip install -r requirements.txt
 pip install nuitka
 
 # 3. Run from source
-python main.py
+python3 main.py
 ```
 
 ---

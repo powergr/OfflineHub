@@ -79,12 +79,16 @@ class ServiceManager:
     def stop(self, name: str):
         with self._lock:
             entry = self._services.get(name)
+            
         if entry and entry.process and entry.process.poll() is None:
-            entry.process.terminate()
             try:
-                entry.process.wait(timeout=5)
-            except Exception:
+                # On Windows, skip the polite terminate() and kill it instantly
+                # for a lightning-fast app shutdown.
                 entry.process.kill()
+                entry.process.wait(timeout=1)
+            except Exception:
+                pass
+                
         with self._lock:
             self._services.pop(name, None)
 

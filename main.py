@@ -22,7 +22,7 @@ for d in (BASE_DIR, MODULES_DIR, BIN_DIR):
 # ── Default config ────────────────────────────────────────────────────────────
 DEFAULT_CONFIG = {
     "first_run": True,
-    "version": "0.1.2",
+    "version": "0.1.3",
     "admin_password_hash": "",          
     "hotspot": {
         "ssid": "OfflineHub",

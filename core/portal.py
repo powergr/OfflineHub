@@ -1,8 +1,5 @@
 """
 PortalServer — serves the browser-facing landing page on the local network.
-
-Runs Flask in a background thread. Integrates the MBTiles tile server
-so no separate Node process is needed.
 """
 
 import os
@@ -11,7 +8,6 @@ import socket
 import threading
 
 from flask import Flask, render_template_string, jsonify, send_from_directory
-
 from core.tileserver import TileServer
 
 # Resolve asset path whether running frozen (PyInstaller/Nuitka) or from source
@@ -49,12 +45,10 @@ class PortalServer:
 
         @app.route("/api/services")
         def services():
-            """Return live service status for the portal JS to render."""
             return jsonify(self.service_mgr.all_services())
 
         @app.route("/api/modules")
         def modules():
-            """Return all installed modules with metadata + live status merged."""
             import json, glob, os
             MODULES_DIR = r"C:\OfflineHub\modules"
             result = {}
@@ -73,6 +67,7 @@ class PortalServer:
                                 "type":        data.get("type", "kiwix"),
                                 "status":      svc_info.get("status", "stopped"),
                                 "port":        svc_info.get("port"),
+                                "format":      data.get("format", "raster")  # Used for MapLibre
                             }
                         except Exception:
                             pass
@@ -82,7 +77,7 @@ class PortalServer:
         def ip():
             return jsonify({"ip": _local_ip()})
 
-        # ── MBTiles tile endpoint ──────────────────────────────────────────
+        # ── MBTiles tile endpoints ──────────────────────────────────────────
         @app.route("/tiles/<module>/<int:z>/<int:x>/<int:y>.png")
         def tile(module, z, x, y):
             from flask import abort, Response
@@ -97,9 +92,15 @@ class PortalServer:
             data = self.tile_server.get_tile(module, z, x, y)
             if data is None:
                 abort(404)
-            return Response(data, mimetype="application/x-protobuf")
+            
+            response = Response(data, mimetype="application/x-protobuf")
+            
+            # 🚀 FIX: Bulletproof GZIP check that won't crash on memoryview objects
+            if len(data) >= 2 and data[0] == 0x1f and data[1] == 0x8b:
+                response.headers['Content-Encoding'] = 'gzip'
+                
+            return response
 
-        # Static assets (CSS, JS, icons)
         @app.route("/static/<path:filename>")
         def static_assets(filename):
             return send_from_directory(ASSETS_DIR, filename)
@@ -108,7 +109,6 @@ class PortalServer:
 
     def start(self):
         port = self.config.get("portal_port", 8000)
-        # Fallback to 8001 if 80 is unavailable
         if not _port_available(port):
             port = _find_free_port(8000)
             self.config["portal_port"] = port

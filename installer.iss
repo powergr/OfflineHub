@@ -1,6 +1,6 @@
 [Setup]
 AppName=Offline Knowledge Hub
-AppVersion=0.1.2
+AppVersion=0.1.3
 AppPublisher=Offline Hub Team
 DefaultDirName=C:\OfflineHub
 DisableProgramGroupPage=yes
@@ -39,3 +39,11 @@ Name: "{commonprograms}\Offline Hub"; Filename: "{app}\main.exe"; IconFilename: 
 [Run]
 ; Option to launch the app immediately after installation
 Filename: "{app}\main.exe"; Description: "{cm:LaunchProgram,Offline Knowledge Hub}"; Flags: nowait postinstall skipifsilent
+
+[UninstallDelete]
+; This tells the uninstaller to aggressively delete all generated files and folders
+Type: filesandordirs; Name: "{app}\bin"
+Type: filesandordirs; Name: "{app}\modules"
+Type: filesandordirs; Name: "{app}\downloads"
+Type: filesandordirs; Name: "{app}\*"
+Type: dirifempty; Name: "{app}"

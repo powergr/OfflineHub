@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Offline Knowledge Hub</title>
     <style>
-      /* ── Fonts (self-hosted subset via Google Fonts CSS import is intentionally
-        omitted for offline use; we fall back to a refined system stack) ── */
       @import url("https://fonts.bunny.net/css?family=space-grotesk:400,600,700|instrument-serif:400i");
 
       :root {
@@ -38,7 +36,6 @@
         overflow-x: hidden;
       }
 
-      /* ── Noise texture overlay ───────────────────────────────────────────── */
       body::before {
         content: "";
         position: fixed;
@@ -48,7 +45,6 @@
         z-index: 0;
       }
 
-      /* ── Header ─────────────────────────────────────────────────────────── */
       header {
         position: relative;
         z-index: 1;
@@ -58,7 +54,6 @@
         padding: 56px 24px 32px;
         text-align: center;
       }
-
       header .eyebrow {
         font-size: 11px;
         letter-spacing: 0.18em;
@@ -66,7 +61,6 @@
         color: var(--accent);
         margin-bottom: 10px;
       }
-
       header h1 {
         font-size: clamp(2rem, 5vw, 3.2rem);
         font-weight: 700;
@@ -76,7 +70,6 @@
         -webkit-text-fill-color: transparent;
         background-clip: text;
       }
-
       header .subtitle {
         margin-top: 12px;
         color: var(--muted);
@@ -85,7 +78,6 @@
         line-height: 1.6;
       }
 
-      /* ── Status bar ──────────────────────────────────────────────────────── */
       #status-bar {
         position: relative;
         z-index: 1;
@@ -95,7 +87,6 @@
         flex-wrap: wrap;
         padding: 0 24px 24px;
       }
-
       .status-chip {
         display: flex;
         align-items: center;
@@ -123,7 +114,6 @@
         background: #d29922;
       }
 
-      /* ── Module grid ─────────────────────────────────────────────────────── */
       main {
         position: relative;
         z-index: 1;
@@ -135,7 +125,6 @@
         padding: 24px 24px 64px;
       }
 
-      /* ── Module card ─────────────────────────────────────────────────────── */
       .card {
         background: var(--surface);
         border: 1px solid var(--border);
@@ -191,7 +180,6 @@
         line-height: 1.55;
         flex: 1;
       }
-
       .card-meta {
         display: flex;
         align-items: center;
@@ -251,15 +239,6 @@
         transform: none;
       }
 
-      /* ── Map card special layout ─────────────────────────────────────────── */
-      #map {
-        height: 260px;
-        border-radius: 10px;
-        overflow: hidden;
-        margin-top: 4px;
-      }
-
-      /* ── Footer ──────────────────────────────────────────────────────────── */
       footer {
         position: relative;
         z-index: 1;
@@ -270,19 +249,44 @@
         border-top: 1px solid var(--border);
       }
 
-      /* ── Leaflet overrides ───────────────────────────────────────────────── */
-      .leaflet-container {
-        background: #1c2128;
+      /* ── Fullscreen Map Overlay ─────────────────────────────────────────── */
+      #map-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: var(--bg);
+        flex-direction: column;
+      }
+      #map-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 24px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+      }
+      #close-map-btn {
+        background: #f85149;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: bold;
+      }
+      #map-container {
+        flex: 1;
+        width: 100%;
       }
     </style>
 
-    <!-- Leaflet (bundled offline copy of leaflet.js / leaflet.css should be placed
-     in assets/portal/leaflet/ — fallback to CDN for dev convenience) -->
+    <!-- MapLibre CSS & JS -->
     <link
+      href="https://unpkg.com/maplibre-gl@3.3.1/dist/maplibre-gl.css"
       rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/maplibre-gl@3.3.1/dist/maplibre-gl.js"></script>
   </head>
 
   <body>
@@ -290,24 +294,19 @@
       <p class="eyebrow">🏫 Offline Knowledge Hub</p>
       <h1>Everything you need,<br />no internet required.</h1>
       <p class="subtitle">
-        Connect to the <strong id="ssid-display">OfflineHub</strong> network,
-        open this page in any browser, and explore.
+        Connect to the network, open this page, and explore.
       </p>
     </header>
 
-    <!-- Status chips -->
     <div id="status-bar">
       <div class="status-chip">
-        <span class="dot dot-green"></span>
-        Hub online
+        <span class="dot dot-green"></span>Hub online
       </div>
       <div class="status-chip" id="ip-chip">
-        <span class="dot dot-yellow"></span>
-        Loading IP…
+        <span class="dot dot-yellow"></span>Loading IP…
       </div>
     </div>
 
-    <!-- Module cards rendered by JS -->
     <main id="cards-container">
       <p style="color: var(--muted); grid-column: 1/-1">Loading modules…</p>
     </main>
@@ -317,9 +316,18 @@
       leaves this network.
     </footer>
 
+    <!-- Fullscreen Map Container -->
+    <div id="map-overlay">
+      <div id="map-header">
+        <h3 id="map-title" style="color: white; margin: 0">OpenStreetMap</h3>
+        <button id="close-map-btn" onclick="closeMap()">Close Map ✖</button>
+      </div>
+      <div id="map-container"></div>
+    </div>
+
     <script>
-      // ── Helpers ───────────────────────────────────────────────────────────────
       const $ = (id) => document.getElementById(id);
+      let currentMap = null;
 
       async function fetchJSON(url) {
         try {
@@ -330,91 +338,213 @@
         }
       }
 
-      // ── Resolve IP ────────────────────────────────────────────────────────────
       async function initIP() {
         const data = await fetchJSON("/api/ip");
         const ip = data?.ip ?? window.location.hostname;
         const port = window.location.port ? `:${window.location.port}` : "";
-        const url = `http://${ip}${port}`;
-        $("ip-chip").innerHTML = `<span class="dot dot-green"></span>${url}`;
+        $("ip-chip").innerHTML =
+          `<span class="dot dot-green"></span>http://${ip}${port}`;
       }
 
-      // ── Build cards from live module API ─────────────────────────────────────
       async function buildCards() {
-        const modules = (await fetchJSON("/api/modules")) ?? {};
+        const modules = (await fetchJSON("/api/modules")) || {};
         const container = $("cards-container");
         container.innerHTML = "";
 
         const entries = Object.entries(modules);
         if (entries.length === 0) {
-          container.innerHTML = `<p style="color: var(--muted); grid-column:1/-1">
-         No modules installed yet. Ask the administrator to set up content.
-       </p>`;
+          container.innerHTML = `<p style="color: var(--muted); grid-column:1/-1">No modules installed yet. Add them via the Admin Panel.</p>`;
           return;
         }
 
         entries.forEach(([id, mod], idx) => {
           const running = mod.status === "running";
           const isMap = mod.type === "mbtiles";
+          const format = mod.format || "raster";
 
           const card = document.createElement("div");
           card.className = "card" + (running ? "" : " unavailable");
           card.style.animationDelay = `${idx * 80}ms`;
 
-          if (isMap && running) {
-            card.innerHTML = `
-        <div class="card-header">
-          <span class="card-emoji">${mod.emoji}</span>
-          <span class="card-name">${mod.name}</span>
-        </div>
-        <p class="card-desc">${mod.description}</p>
-        <div id="map-${id}"></div>
-        <div class="card-meta">
-          <span class="badge badge-running">● Running</span>
-        </div>`;
-            container.appendChild(card);
-            initMap(id);
-          } else {
-            const openURL =
-              running && mod.port
-                ? `http://${window.location.hostname}:${mod.port}`
-                : "#";
-
-            card.innerHTML = `
-        <div class="card-header">
-          <span class="card-emoji">${mod.emoji}</span>
-          <span class="card-name">${mod.name}</span>
-        </div>
-        <p class="card-desc">${mod.description || ""}</p>
-        <div class="card-meta">
-          <span class="badge ${running ? "badge-running" : "badge-stopped"}">
-            ${running ? "● Running" : "● Not started"}
-          </span>
-          <a class="open-btn"
-             href="${openURL}"
-             target="_blank"
-             ${!running ? 'aria-disabled="true" tabindex="-1"' : ""}>
-            Open ↗
-          </a>
-        </div>`;
-            container.appendChild(card);
+          let actionHTML = `<button class="open-btn" disabled>Offline</button>`;
+          if (running) {
+            if (isMap) {
+              actionHTML = `<button class="open-btn" onclick="openMap('${id}', '${mod.name}', '${format}')">Open Map ↗</button>`;
+            } else {
+              actionHTML = `<a class="open-btn" href="http://${window.location.hostname}:${mod.port}" target="_blank">Open ↗</a>`;
+            }
           }
+
+          card.innerHTML = `
+            <div class="card-header">
+              <span class="card-emoji">${mod.emoji}</span>
+              <span class="card-name">${mod.name}</span>
+            </div>
+            <p class="card-desc">${mod.description || ""}</p>
+            <div class="card-meta">
+              <span class="badge ${running ? "badge-running" : "badge-stopped"}">
+                ${running ? "● Running" : "● Not started"}
+              </span>
+              ${actionHTML}
+            </div>`;
+
+          container.appendChild(card);
         });
       }
 
-      // ── Leaflet map ───────────────────────────────────────────────────────────
-      function initMap(moduleId) {
-        const leafletMap = L.map(`map-${moduleId}`, {
-          zoomControl: true,
-        }).setView([51.5, 10], 4);
-        L.tileLayer(`/tiles/${moduleId}/{z}/{x}/{y}.png`, {
-          maxZoom: 18,
-          attribution: "© OpenStreetMap contributors",
-          tileSize: 256,
-        }).addTo(leafletMap);
+      // ── Fullscreen Map Logic ────────────────────────────────────────────────
+      function openMap(moduleId, moduleName, format) {
+        $("map-title").innerText = moduleName;
+        $("map-overlay").style.display = "flex";
+
+        if (currentMap) {
+          currentMap.remove();
+        }
+
+        // 🚀 Smart Auto-Centering based on Map Name
+        let startCenter = [10, 50]; // Default: Europe
+        let startZoom = 4;
+        if (moduleName.toLowerCase().includes("cyprus")) {
+          startCenter = [33.36, 35.12]; // Center of Cyprus
+          startZoom = 8;
+        } else if (moduleName.toLowerCase().includes("london")) {
+          startCenter = [-0.12, 51.5];
+          startZoom = 10;
+        }
+
+        let styleObj;
+        if (format === "vector" || format === "pbf") {
+          styleObj = {
+            version: 8,
+            sources: {
+              "offline-vector": {
+                type: "vector",
+                tiles: [`/tiles/${moduleId}/{z}/{x}/{y}.pbf`],
+              },
+            },
+            layers: [
+              // Base land color (Tan)
+              {
+                id: "bg",
+                type: "background",
+                paint: { "background-color": "#f2efe9" },
+              },
+
+              // ── MapTiler / OpenMapTiles Schema ──
+              {
+                id: "water-omt",
+                type: "fill",
+                source: "offline-vector",
+                "source-layer": "water",
+                paint: { "fill-color": "#a0c8f0" },
+              },
+              {
+                id: "roads-omt",
+                type: "line",
+                source: "offline-vector",
+                "source-layer": "transportation",
+                paint: { "line-color": "#ffffff", "line-width": 1.5 },
+              },
+              {
+                id: "building-omt",
+                type: "fill",
+                source: "offline-vector",
+                "source-layer": "building",
+                paint: { "fill-color": "#d9d6ce" },
+              },
+              {
+                id: "landcover-omt",
+                type: "fill",
+                source: "offline-vector",
+                "source-layer": "landcover",
+                paint: { "fill-color": "#d0e3c8" },
+              },
+              {
+                id: "landuse-omt",
+                type: "fill",
+                source: "offline-vector",
+                "source-layer": "landuse",
+                paint: { "fill-color": "#e6e2d8" },
+              },
+              {
+                id: "boundary-omt",
+                type: "line",
+                source: "offline-vector",
+                "source-layer": "boundary",
+                paint: { "line-color": "#ffaa00", "line-width": 2 },
+              },
+
+              // ── BBBike / Tilezen / Protomaps Schema Fallbacks ──
+              {
+                id: "earth-tz",
+                type: "fill",
+                source: "offline-vector",
+                "source-layer": "earth",
+                paint: { "fill-color": "#e0e4e8" },
+              },
+              {
+                id: "roads-tz",
+                type: "line",
+                source: "offline-vector",
+                "source-layer": "roads",
+                paint: { "line-color": "#ffffff", "line-width": 1.5 },
+              },
+              {
+                id: "roads-pm",
+                type: "line",
+                source: "offline-vector",
+                "source-layer": "transit",
+                paint: { "line-color": "#ffffff", "line-width": 1.5 },
+              },
+              {
+                id: "building-tz",
+                type: "fill",
+                source: "offline-vector",
+                "source-layer": "buildings",
+                paint: { "fill-color": "#d9d6ce" },
+              },
+              {
+                id: "boundary-tz",
+                type: "line",
+                source: "offline-vector",
+                "source-layer": "boundaries",
+                paint: { "line-color": "#ffaa00", "line-width": 2 },
+              },
+            ],
+          };
+        } else {
+          styleObj = {
+            version: 8,
+            sources: {
+              "offline-raster": {
+                type: "raster",
+                tiles: [`/tiles/${moduleId}/{z}/{x}/{y}.png`],
+                tileSize: 256,
+              },
+            },
+            layers: [
+              { id: "raster-layer", type: "raster", source: "offline-raster" },
+            ],
+          };
+        }
+
+        currentMap = new maplibregl.Map({
+          container: "map-container",
+          center: startCenter,
+          zoom: startZoom,
+          style: styleObj,
+        });
+
+        currentMap.addControl(new maplibregl.NavigationControl());
+
+        // 🚀 DEBUG MODE: Draws red boxes anywhere map data exists!
+        currentMap.showTileBoundaries = true;
       }
 
-      // ── Auto-refresh every 30s ────────────────────────────────────────────────
+      function closeMap() {
+        $("map-overlay").style.display = "none";
+      }
+
       async function init() {
         await Promise.all([initIP(), buildCards()]);
       }

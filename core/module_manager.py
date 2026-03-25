@@ -186,7 +186,9 @@ class ModuleManager:
 
         # Wait up to 10 seconds for the port to be ready
         port = self.service_mgr.get_port(folder)
-        if port:
+        
+        # 🚀 FIX: Do not wait if it is an mbtiles map, because it is a virtual service!
+        if port and data.get("type") != "mbtiles":
             import time
             for _ in range(20):
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
