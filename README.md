@@ -4,7 +4,7 @@ A self-contained Windows application that serves Wikipedia, Khan Academy,
 Project Gutenberg, and OpenStreetMap to students over a local Wi-Fi hotspot
 or LAN — no internet required after setup.
 
-The project is **WORK IN PROGRESS**. v0.1.3
+The project is **WORK IN PROGRESS**. v0.1.4
 
 ---
 
@@ -34,7 +34,7 @@ hub/
 │
 ├── assets/
 │   └── portal/
-│       └── index.html       # Student-facing browser portal
+│       └── index.html       # Student-facing browser portal (MapLibre GL JS)
 │
 └── vendor/                  # Place third-party binaries here before building
     ├── kiwix-serve.exe      # Download from https://www.kiwix.org/en/downloads/
@@ -49,14 +49,14 @@ hub/
 # 1. Create a virtual environment
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-or source .venv/Scripts/activate
+# or: source .venv/Scripts/activate
 
 # 2. Install dependencies (including Nuitka for building)
 pip install -r requirements.txt
 pip install nuitka
 
 # 3. Run from source
-python3 main.py
+python main.py
 ```
 
 ---
@@ -99,7 +99,7 @@ Simply double-click the **`build.bat`** file in the project root, or run it from
 2. Triggers Inno Setup to bundle `main.dist`, your `assets/`, `config.json`, and `vendor/` binaries into a single, compressed installer.
 3. Outputs **`OfflineHub_Setup.exe`** into an `Output/` folder.
 
-You only need to distribute `OfflineHub_Setup.exe`. No Python or dependencies are needed on target machines.
+You only need to distribute `OfflineHub_Setup.exe`. No Python or dependencies are needed on target machines. The uninstaller is programmed to cleanly remove all downloaded content when uninstalled.
 
 ---
 
@@ -118,24 +118,39 @@ You only need to distribute `OfflineHub_Setup.exe`. No Python or dependencies ar
 
 ## Content Catalogue
 
-| Module                   | Format     | Server                     | Approx. Size |
-| ------------------------ | ---------- | -------------------------- | ------------ |
-| Wikipedia (English Mini) | `.zim`     | kiwix-serve                | ~12 GB       |
-| Project Gutenberg        | `.zim`     | kiwix-serve                | ~60 GB       |
-| Khan Academy             | `.zim`     | kiwix-serve                | ~18 GB       |
-| OpenStreetMap Europe     | `.mbtiles` | Built-in Flask tile server | ~8 GB        |
+The setup wizard and Admin Panel provide a 1-click installer for automated starter content:
+
+| Module                   | Format | Server      | Approx. Size |
+| ------------------------ | ------ | ----------- | ------------ |
+| Wikipedia (English Mini) | `.zim` | kiwix-serve | ~12 GB       |
+| Project Gutenberg        | `.zim` | kiwix-serve | ~15 GB       |
+| Khan Academy (Computing) | `.zim` | kiwix-serve | ~1.8 GB      |
 
 ZIM download URLs are in `core/downloader.py → CATALOGUE`.
 Update them to point to newer Kiwix releases as needed.
 
 ---
 
-## Custom Modules
+## Adding Custom Modules & Offline Maps
 
-You can package any Kiwix ZIM file, Kolibri channel, or MBTiles map as a custom
-module and install it via **Admin Panel → Modules → Add Module from ZIP**.
+You can easily add new libraries, books, and interactive offline maps directly from the Admin Panel.
 
-### Module folder structure
+### 1. The Easy Way: Raw Files (Magic Installer)
+
+The app features a smart module installer that handles all the complex folder structures for you.
+
+1. Download any `.zim` file from the [Kiwix Library](https://library.kiwix.org).
+2. Download any `.mbtiles` map (Raster or Vector) from [BBBike](https://extract.bbbike.org/) or [MapTiler](https://data.maptiler.com/downloads/europe/).
+3. Open the **Admin Panel** (Ctrl + Shift + A).
+4. Click **📦 Add File (.zim / .mbtiles / .zip)** and select your file.
+
+The app will instantly move the file, generate a readable name, assign an emoji, build the underlying `manifest.json`, and start the background service.
+
+### 2. The Advanced Way: Custom ZIP Modules
+
+If you want granular control over your module (or are deploying Kolibri channels), you can still package files into a ZIP using the standard structure.
+
+**Module folder structure:**
 
 ```bash
 my_module/
@@ -144,15 +159,14 @@ my_module/
     └── myfile.zim       ← or .mbtiles for maps
 ```
 
-Zip the `my_module/` folder and the result is ready to install.
-
-### manifest.json reference
+**manifest.json reference:**
 
 ```json
 {
-  "name": "My Module",
-  "emoji": "📘",
-  "type": "kiwix",
+  "name": "London Map",
+  "emoji": "🗺️",
+  "type": "mbtiles",
+  "format": "vector",
   "description": "A short description shown on the module card."
 }
 ```
@@ -162,20 +176,14 @@ Zip the `my_module/` folder and the result is ready to install.
 | `name`        | ✅       | Any string                      | Displayed as the card title       |
 | `emoji`       | ✅       | Any single emoji                | Displayed next to the title       |
 | `type`        | ✅       | `kiwix` / `kolibri` / `mbtiles` | Controls which server is used     |
+| `format`      | ❌       | `raster` / `vector`             | Used for Maps (`mbtiles`) only    |
 | `description` | ❌       | Any string                      | Shown in smaller text on the card |
 
 **Type behaviour:**
 
-- `kiwix` — the hub searches the module folder for a `kiwix-serve.exe` and any `.zim` files, then starts kiwix-serve automatically when the module is opened. Place `kiwix-serve.exe` in the module root or any subfolder.
-- `kolibri` — the hub looks for a `kolibri.exe` and starts Kolibri with `KOLIBRI_HOME` pointed at the module's `kolibri_home/` subfolder.
-- `mbtiles` — no separate process is started. The hub's built-in Flask tile server reads the `.mbtiles` file directly from the `content/` subfolder and serves tiles at `/tiles/<module_name>/{z}/{x}/{y}.png`. The portal page renders the map using Leaflet.
-
-### Example: packaging a custom ZIM
-
-1. Download any `.zim` from [library.kiwix.org](https://library.kiwix.org)
-2. Copy `kiwix-serve.exe` from `C:\OfflineHub\bin\` into the module folder
-3. Create `manifest.json` as shown above with `"type": "kiwix"`
-4. Zip the folder and install via Admin Panel
+- `kiwix` — Starts kiwix-serve automatically when the module is opened.
+- `kolibri` — Looks for a `kolibri.exe` and starts Kolibri with `KOLIBRI_HOME` pointed at the module's subfolder.
+- `mbtiles` — No separate process is started. The Flask server reads the SQLite `.mbtiles` file and streams vector (`.pbf`) or raster (`.png`) tiles directly to the MapLibre GL JS frontend.
 
 ---
 
@@ -209,7 +217,7 @@ Open with **Ctrl + Shift + A** from the main window.
 
 | Tab      | Purpose                                      |
 | -------- | -------------------------------------------- |
-| Modules  | Download content, add from folder, remove    |
+| Modules  | Download content, add raw files/ZIPs, remove |
 | Hotspot  | Configure SSID / password, toggle hotspot    |
 | Services | View running processes, stop / restart       |
 | Settings | Portal port, boot autostart, change password |
@@ -218,11 +226,7 @@ Open with **Ctrl + Shift + A** from the main window.
 
 ## Architecture Notes
 
-- **No Node.js required.** Map tiles are served directly from `.mbtiles`
-  (SQLite) files by a Flask route in `core/tileserver.py`.
-- **Hotspot** uses the Windows WinRT Mobile Hotspot API first (Win10/11),
-  falling back to `netsh wlan hostednetwork` for older hardware.
-- **All services** (kiwix-serve, Kolibri) are managed as subprocesses with
-  automatic health-check restarts every 30 seconds.
-- **Downloads** are resumable — if interrupted, the next attempt picks up
-  from where it left off using HTTP Range headers.
+- **Native Map Engine:** The student portal uses MapLibre GL JS, fully supporting both high-definition Raster Maps and compressed Vector Maps without needing Node.js or Mapbox servers.
+- **Fast Shutdown:** Windows process management via `taskkill` ensures instant cleanup of Kiwix background threads when closing the app.
+- **Hotspot** uses the Windows WinRT Mobile Hotspot API first (Win10/11), falling back to `netsh wlan hostednetwork` for older hardware.
+- **Downloads** are resumable — if interrupted, the next attempt picks up from where it left off using HTTP Range headers.

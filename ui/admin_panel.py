@@ -4,6 +4,7 @@ Admin Panel — tabbed window for content management, hotspot, services, setting
 
 import hashlib
 import threading
+import webbrowser
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
@@ -50,11 +51,33 @@ class AdminPanel(ctk.CTkToplevel):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _build_modules_tab(self, tab):
-        # ── Download section ─────────────────────────────────────────────────
+        # ── Library Providers ─────────────────────────────────────────────────
         ctk.CTkLabel(
-            tab, text="Download Content",
+            tab, text="🌐 Discover Free Content",
             font=ctk.CTkFont(size=16, weight="bold")
         ).pack(anchor="w", pady=(12, 4))
+        
+        lib_row = ctk.CTkFrame(tab, fg_color="transparent")
+        lib_row.pack(fill="x", pady=4)
+        
+        ctk.CTkButton(
+            lib_row, text="📚 Download Wikipedia, Books & Khan (Kiwix)", width=320,
+            command=lambda: webbrowser.open("https://library.kiwix.org/")
+        ).pack(side="left", padx=(0, 10))
+
+        ctk.CTkButton(
+            lib_row, text="🗺️ Download Maps (MapTiler)", width=220,
+            fg_color="#334", hover_color="#445",
+            command=lambda: webbrowser.open("https://data.maptiler.com/downloads/europe/")
+        ).pack(side="left")
+
+        ctk.CTkFrame(tab, height=1, fg_color="#30363d").pack(fill="x", pady=12)
+
+        # ── Quick Download ───────────────────────────────────────────────────
+        ctk.CTkLabel(
+            tab, text="Automated Starter Content",
+            font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(anchor="w", pady=(0, 4))
 
         for key, item in CATALOGUE.items():
             row = ctk.CTkFrame(tab, fg_color="transparent")
@@ -86,38 +109,20 @@ class AdminPanel(ctk.CTkToplevel):
 
         ctk.CTkFrame(tab, height=1, fg_color="#30363d").pack(fill="x", pady=12)
 
-        # ── Map Providers ────────────────────────────────────────────────────
-        ctk.CTkLabel(
-            tab, text="🗺️ Get Offline Maps",
-            font=ctk.CTkFont(size=16, weight="bold")
-        ).pack(anchor="w", pady=(0, 4))
-        
-        map_row = ctk.CTkFrame(tab, fg_color="transparent")
-        map_row.pack(fill="x", pady=4)
-        
-        import webbrowser
-        ctk.CTkButton(
-            map_row, text="Draw Custom Map (BBBike)", width=180,
-            command=lambda: webbrowser.open("https://extract.bbbike.org/")
-        ).pack(side="left", padx=(0, 10))
-
-        ctk.CTkButton(
-            map_row, text="Download Countries (MapTiler)", width=180,
-            fg_color="#334", hover_color="#445",
-            command=lambda: webbrowser.open("https://data.maptiler.com/downloads/europe/")
-        ).pack(side="left")
-        
-        ctk.CTkFrame(tab, height=1, fg_color="#30363d").pack(fill="x", pady=12)
-
         # ── Manual add ───────────────────────────────────────────────────────
         ctk.CTkLabel(
             tab, text="Manual Install",
             font=ctk.CTkFont(size=16, weight="bold")
         ).pack(anchor="w", pady=(0, 4))
 
+        ctk.CTkLabel(
+            tab, text="Select any raw .zim file, .mbtiles file, or legacy .zip module.",
+            font=ctk.CTkFont(size=12), text_color="#888"
+        ).pack(anchor="w", pady=(0, 6))
+
         ctk.CTkButton(
-            tab, text="📦  Add Module from ZIP",
-            command=self._add_from_zip
+            tab, text="📦  Add File (.zim / .mbtiles / .zip)",
+            command=self._add_module_file
         ).pack(fill="x", pady=4)
 
         ctk.CTkButton(
@@ -148,27 +153,35 @@ class AdminPanel(ctk.CTkToplevel):
             daemon=True
         ).start()
 
-    def _add_from_zip(self):
-        zip_path = filedialog.askopenfilename(
-            title="Select Module ZIP file",
-            filetypes=[("ZIP files", "*.zip")],
+    def _add_module_file(self):
+        # 🚀 Now allows the user to pick raw ZIM and Map files!
+        filepath = filedialog.askopenfilename(
+            title="Select Content File",
+            filetypes=[("Module Files", "*.zim *.mbtiles *.zip"), ("All Files", "*.*")],
             parent=self
         )
-        if not zip_path:
+        if not filepath:
             return
 
         def run_install():
             try:
-                self.module_mgr.install_from_zip(zip_path)
+                ext = filepath.lower()
+                
+                # If they used the old ZIP method, handle it safely
+                if ext.endswith(".zip"):
+                    self.module_mgr.install_from_zip(filepath)
+                # If they clicked a raw file, magically handle it!
+                else:
+                    self.module_mgr.install_from_raw_file(filepath)
+                
                 self.after(0, self.refresh_cb)
-                self.after(0, lambda: messagebox.showinfo("Success", "Module installed successfully.", parent=self))
+                self.after(0, lambda: messagebox.showinfo("Success", "Module automatically installed and started!", parent=self))
             except Exception as e:
                 import traceback
                 with open(r"C:\OfflineHub\debug_log.txt", "a", encoding="utf-8") as f:
                     f.write(traceback.format_exc() + "\n")
                 self.after(0, lambda err=e: messagebox.showerror("Install Error", str(err), parent=self))
 
-        import threading
         threading.Thread(target=run_install, daemon=True).start()
 
     def _remove_module(self):

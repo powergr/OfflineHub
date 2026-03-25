@@ -8,6 +8,7 @@ import glob
 import json
 import socket
 import webbrowser
+import shutil
 from shutil import copytree, rmtree, copy2
 
 # Resolved at runtime by main.py bootstrapping
@@ -24,7 +25,7 @@ class ModuleManager:
     # ── Listing ───────────────────────────────────────────────────────────────
 
     def list_modules(self) -> list[tuple[str, dict]]:
-        results = []
+        results =[]
         if not os.path.isdir(MODULES_DIR):
             return results
         for folder in sorted(os.listdir(MODULES_DIR)):
@@ -35,63 +36,82 @@ class ModuleManager:
                         data = json.load(f)
                     results.append((folder, data))
                 except Exception as e:
-                    # Print the error so you can see if the JSON format is broken!
                     print(f"[WARNING] Skipping module '{folder}': invalid manifest.json ({e})")
         return results
 
     # ── Install ───────────────────────────────────────────────────────────────
 
-    def add_from_folder(self, src_folder: str):
-        # 1. Search for manifest.json
-        manifest_dir = None
-        for root, dirs, files in os.walk(src_folder):
-            if "manifest.json" in files:
-                manifest_dir = root
-                break
+    def install_from_raw_file(self, filepath: str):
+        """
+        MAGIC INSTALLER: Takes a raw .zim or .mbtiles file, figures out the name,
+        builds the folder structure, generates the manifest, and launches it.
+        """
+        filename = os.path.basename(filepath)
+        basename, ext = os.path.splitext(filename)
+        ext = ext.lower()
 
-        if not manifest_dir:
-            raise FileNotFoundError(f"Invalid module: 'manifest.json' not found inside the ZIP.")
+        if ext not in [".zim", ".mbtiles"]:
+            raise ValueError(f"Unsupported file type '{ext}'. Please select a .zim or .mbtiles file.")
 
-        # 2. Parse the manifest
-        manifest_path = os.path.join(manifest_dir, "manifest.json")
-        try:
-            with open(manifest_path, encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as e:
-            raise ValueError(f"manifest.json is corrupted or invalid JSON. Error: {e}")
-
-        # 3. Create a safe destination folder name
-        raw_name = data.get("name", os.path.basename(src_folder.rstrip("/\\")))
-        safe_name = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in raw_name).strip()
+        mod_type = "kiwix" if ext == ".zim" else "mbtiles"
         
-        dest = os.path.join(MODULES_DIR, safe_name)
-        if os.path.exists(dest):
-            raise FileExistsError(f"Module '{safe_name}' already exists.")
+        # 1. Clean up the filename to make a readable title
+        clean_name = basename.replace("_", " ").title()
+        
+        # 2. Smart Emoji Guesser
+        emoji = "📦"
+        lower_name = basename.lower()
+        if "wikipedia" in lower_name: emoji = "📚"
+        elif "gutenberg" in lower_name: emoji = "📖"
+        elif "khan" in lower_name or "kolibri" in lower_name: emoji = "🎓"
+        elif ext == ".mbtiles": emoji = "🗺️"
 
-        # 4. Copy the files
-        copytree(manifest_dir, dest)
+        # 3. Create a safe folder name
+        safe_name = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in basename).strip()
+        dest_dir = os.path.join(MODULES_DIR, safe_name)
+        
+        if os.path.exists(dest_dir):
+            raise FileExistsError(f"Module '{safe_name}' is already installed.")
 
-        # 🚀 NEW FIX: Automatically start the service so it appears in the Services Tab!
-        try:
-            self.launch_module(safe_name, data)
-        except Exception as e:
-            print(f"Module copied, but failed to start automatically: {e}")
+        # 4. Build the folder structure
+        content_dir = os.path.join(dest_dir, "content")
+        os.makedirs(content_dir, exist_ok=True)
+
+        # 5. Move the massive file instantly (instead of copying, which takes forever)
+        dest_file = os.path.join(content_dir, filename)
+        shutil.move(filepath, dest_file)
+
+        # 6. Copy kiwix-serve.exe if needed
+        if mod_type == "kiwix":
+            self._ensure_kiwix(dest_dir)
+
+        # 7. Auto-generate the manifest.json
+        manifest = {
+            "name": clean_name,
+            "emoji": emoji,
+            "type": mod_type,
+            "description": f"Imported automatically from {filename}"
+        }
+        
+        if mod_type == "mbtiles":
+            manifest["format"] = "vector" if "vector" in lower_name else "raster"
+
+        with open(os.path.join(dest_dir, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+
+        # 8. Start it up!
+        self.launch_module(safe_name, manifest)
+
 
     def install_from_zip(self, zip_path: str):
-        """
-        Safely extracts a ZIP file, reads the manifest to get the module name,
-        creates a dedicated folder for it, and launches it.
-        """
+        """Safely extracts a ZIP file and installs the module."""
         import zipfile
         import tempfile
-        import shutil
 
-        # 1. Extract to a safe temporary Windows folder first
         with tempfile.TemporaryDirectory() as temp_dir:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
 
-            # 2. Find the manifest.json inside the temp folder (handles double-folder zips)
             manifest_dir = None
             for root, dirs, files in os.walk(temp_dir):
                 if "manifest.json" in files:
@@ -101,7 +121,6 @@ class ModuleManager:
             if not manifest_dir:
                 raise FileNotFoundError("Invalid ZIP: 'manifest.json' not found inside.")
 
-            # 3. Read the manifest to get the module's name
             manifest_path = os.path.join(manifest_dir, "manifest.json")
             try:
                 with open(manifest_path, encoding="utf-8") as f:
@@ -109,7 +128,6 @@ class ModuleManager:
             except Exception as e:
                 raise ValueError(f"manifest.json is corrupted or invalid JSON. Error: {e}")
 
-            # 4. Create a safe folder name based on the manifest name
             raw_name = data.get("name", "Custom Module")
             safe_name = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in raw_name).strip()
             
@@ -117,25 +135,14 @@ class ModuleManager:
             if os.path.exists(dest):
                 raise FileExistsError(f"Module '{safe_name}' is already installed.")
 
-            # 5. Move the clean files to their new permanent home
             shutil.copytree(manifest_dir, dest)
 
-            # 6. Ensure kiwix-serve.exe is copied if needed
             if data.get("type", "kiwix") == "kiwix":
                 self._ensure_kiwix(dest)
 
-            # 7. Automatically start the service!
-            try:
-                self.launch_module(safe_name, data)
-            except Exception as e:
-                print(f"Module installed, but failed to start automatically: {e}")
+            self.launch_module(safe_name, data)
 
     def install_from_download(self, key: str, item: dict, downloaded_path: str):
-        """
-        Called after a download completes.
-        Moves the downloaded file into the correct module directory
-        and writes/updates the manifest.
-        """
         mod_dir = os.path.join(MODULES_DIR, key)
         os.makedirs(os.path.join(mod_dir, "content"), exist_ok=True)
 
@@ -143,11 +150,9 @@ class ModuleManager:
         if downloaded_path != dest_file:
             copy2(downloaded_path, dest_file)
 
-        # Copy kiwix-serve if needed
         if item.get("server") == "kiwix":
             self._ensure_kiwix(mod_dir)
 
-        # Write manifest
         manifest = {
             "name":        item["name"],
             "emoji":       item["emoji"],
@@ -157,8 +162,10 @@ class ModuleManager:
         with open(os.path.join(mod_dir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
 
+    def add_from_folder(self, src_folder: str):
+        pass # Replaced by install_from_zip and install_from_raw_file
+
     def _ensure_kiwix(self, mod_dir: str):
-        """Copy kiwix-serve.exe from vendor bin into module dir if missing."""
         kiwix_bin = os.path.join(BIN_DIR, "kiwix-serve.exe")
         dest      = os.path.join(mod_dir, "kiwix-serve.exe")
         if os.path.exists(kiwix_bin) and not os.path.exists(dest):
@@ -174,20 +181,14 @@ class ModuleManager:
     # ── Launch ────────────────────────────────────────────────────────────────
 
     def launch_module(self, folder: str, data: dict) -> tuple[int | None, str | None]:
-        """
-        Starts the module's backing service if not running.
-        Returns (port, None) on success, or (None, error_message) on failure.
-        """
         status = self.service_mgr.get_status(folder)
         if status != "running":
             ok, err = self._start_service(folder, data)
             if not ok:
                 return None, err
 
-        # Wait up to 10 seconds for the port to be ready
         port = self.service_mgr.get_port(folder)
         
-        # 🚀 FIX: Do not wait if it is an mbtiles map, because it is a virtual service!
         if port and data.get("type") != "mbtiles":
             import time
             for _ in range(20):
@@ -214,7 +215,6 @@ class ModuleManager:
     def _start_kiwix(self, folder: str, path: str):
         import subprocess
 
-        # Look for kiwix-serve in the module folder first, then fall back to BIN_DIR
         exe = glob.glob(os.path.join(path, "**", "kiwix-serve*.exe"), recursive=True)
         if not exe:
             bin_exe = os.path.join(BIN_DIR, "kiwix-serve.exe")
@@ -224,20 +224,10 @@ class ModuleManager:
         zims = glob.glob(os.path.join(path, "**", "*.zim"), recursive=True)
 
         if not exe:
-            return False, (
-                "kiwix-serve.exe not found.\n\n"
-                f"Place kiwix-serve.exe in:\n  {BIN_DIR}\n"
-                "or inside the module folder, then try again.\n\n"
-                "Download it from: https://www.kiwix.org/en/downloads/ "
-                "(kiwix-tools Windows build)"
-            )
+            return False, ("kiwix-serve.exe not found.")
 
         if not zims:
-            return False, (
-                f"No .zim file found in module folder:\n  {path}\n\n"
-                "Make sure your module ZIP contains a .zim file inside a "
-                "'content/' subfolder."
-            )
+            return False, ("No .zim file found in module folder.")
 
         port = _free_port(8081)
         cmd  = [exe[0], f"--port={port}"] + zims
@@ -245,7 +235,7 @@ class ModuleManager:
             cmd, cwd=path,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NO_WINDOW  # suppress console window
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         self.service_mgr.register(folder, proc, port)
         return True, None
@@ -254,16 +244,17 @@ class ModuleManager:
         import subprocess
         exe = glob.glob(os.path.join(path, "**", "kolibri*.exe"), recursive=True)
         if not exe:
-            return
+            return False, "kolibri.exe not found"
 
         port = _free_port(8080)
         env  = os.environ.copy()
         env["KOLIBRI_HOME"] = os.path.join(path, "kolibri_home")
-        cmd  = [exe[0], "start", "--port", str(port), "--foreground"]
+        cmd  =[exe[0], "start", "--port", str(port), "--foreground"]
         proc = subprocess.Popen(cmd, cwd=path, env=env,
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL)
         self.service_mgr.register(folder, proc, port)
+        return True, None
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────

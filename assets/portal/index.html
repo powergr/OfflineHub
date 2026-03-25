@@ -366,10 +366,13 @@
           card.className = "card" + (running ? "" : " unavailable");
           card.style.animationDelay = `${idx * 80}ms`;
 
+          // Escape quotes in the module name so it doesn't break the HTML button
+          const safeName = (mod.name || "").replace(/'/g, "\\'");
+
           let actionHTML = `<button class="open-btn" disabled>Offline</button>`;
           if (running) {
             if (isMap) {
-              actionHTML = `<button class="open-btn" onclick="openMap('${id}', '${mod.name}', '${format}')">Open Map ↗</button>`;
+              actionHTML = `<button class="open-btn" onclick="openMap('${id}', '${safeName}', '${format}')">Open Map ↗</button>`;
             } else {
               actionHTML = `<a class="open-btn" href="http://${window.location.hostname}:${mod.port}" target="_blank">Open ↗</a>`;
             }
@@ -401,36 +404,40 @@
           currentMap.remove();
         }
 
-        // 🚀 Smart Auto-Centering based on Map Name
-        let startCenter = [10, 50]; // Default: Europe
+        let startCenter = [10, 50];
         let startZoom = 4;
         if (moduleName.toLowerCase().includes("cyprus")) {
-          startCenter = [33.36, 35.12]; // Center of Cyprus
+          startCenter = [33.36, 35.12];
           startZoom = 8;
         } else if (moduleName.toLowerCase().includes("london")) {
           startCenter = [-0.12, 51.5];
           startZoom = 10;
         }
 
+        const safeId = encodeURIComponent(moduleId);
+
+        // 🚀 FIX: Grab the absolute URL (e.g., http://127.0.0.1:8000) so Web Workers don't crash
+        const baseUrl = window.location.origin;
+
         let styleObj;
         if (format === "vector" || format === "pbf") {
           styleObj = {
             version: 8,
+            // 🚀 FIX: Add baseUrl to the tiles link
             sources: {
               "offline-vector": {
                 type: "vector",
-                tiles: [`/tiles/${moduleId}/{z}/{x}/{y}.pbf`],
+                tiles: [`${baseUrl}/tiles/${safeId}/{z}/{x}/{y}.pbf`],
               },
             },
             layers: [
-              // Base land color (Tan)
               {
                 id: "bg",
                 type: "background",
                 paint: { "background-color": "#f2efe9" },
               },
 
-              // ── MapTiler / OpenMapTiles Schema ──
+              // MapTiler Schema
               {
                 id: "water-omt",
                 type: "fill",
@@ -474,7 +481,7 @@
                 paint: { "line-color": "#ffaa00", "line-width": 2 },
               },
 
-              // ── BBBike / Tilezen / Protomaps Schema Fallbacks ──
+              // BBBike / Tilezen Schema Fallbacks
               {
                 id: "earth-tz",
                 type: "fill",
@@ -490,35 +497,22 @@
                 paint: { "line-color": "#ffffff", "line-width": 1.5 },
               },
               {
-                id: "roads-pm",
-                type: "line",
-                source: "offline-vector",
-                "source-layer": "transit",
-                paint: { "line-color": "#ffffff", "line-width": 1.5 },
-              },
-              {
                 id: "building-tz",
                 type: "fill",
                 source: "offline-vector",
                 "source-layer": "buildings",
                 paint: { "fill-color": "#d9d6ce" },
               },
-              {
-                id: "boundary-tz",
-                type: "line",
-                source: "offline-vector",
-                "source-layer": "boundaries",
-                paint: { "line-color": "#ffaa00", "line-width": 2 },
-              },
             ],
           };
         } else {
           styleObj = {
             version: 8,
+            // 🚀 FIX: Add baseUrl to the raster tiles link too
             sources: {
               "offline-raster": {
                 type: "raster",
-                tiles: [`/tiles/${moduleId}/{z}/{x}/{y}.png`],
+                tiles: [`${baseUrl}/tiles/${safeId}/{z}/{x}/{y}.png`],
                 tileSize: 256,
               },
             },
@@ -536,8 +530,6 @@
         });
 
         currentMap.addControl(new maplibregl.NavigationControl());
-
-        // 🚀 DEBUG MODE: Draws red boxes anywhere map data exists!
         currentMap.showTileBoundaries = true;
       }
 

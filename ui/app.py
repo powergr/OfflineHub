@@ -22,7 +22,7 @@ class OfflineHub(ctk.CTk):
         self.config      = config
         self.save_config = save_config
 
-        self.title("Offline School Knowledge Hub")
+        self.title("Offline Knowledge Hub")
         self.geometry("1100x740")
         self.resizable(True, True)
 
@@ -61,7 +61,7 @@ class OfflineHub(ctk.CTk):
 
         ctk.CTkLabel(
             hdr,
-            text="🏫 Offline School Knowledge Hub",
+            text="🏫 Offline Knowledge Hub",
             font=ctk.CTkFont(size=30, weight="bold")
         ).pack(side="left")
 
