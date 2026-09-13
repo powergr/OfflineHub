@@ -34,7 +34,7 @@ bp = Blueprint("admin", __name__)
 _ALWAYS_OPEN = {"admin.login", "admin.setup", "admin.setup_finish"}
 _SETUP_DOWNLOAD_ENDPOINTS = {
     "admin.download_quickstart", "admin.download_search",
-    "admin.download_custom", "admin.download_status",
+    "admin.download_custom", "admin.download_llm", "admin.download_status",
 }
 
 _MAX_ATTEMPTS = 5
@@ -88,6 +88,15 @@ def _gate():
     if not session.get("admin_authed"):
         return redirect(url_for("admin.login"))
     return None
+
+
+# ── Index ─────────────────────────────────────────────────────────────────────
+
+@bp.route("/")
+def index():
+    """Bare '/admin' has no page of its own — send visitors to whatever the
+    _gate() before_request would otherwise land them on (setup/login/modules)."""
+    return redirect(url_for("admin.modules"))
 
 
 # ── Login / logout ────────────────────────────────────────────────────────────

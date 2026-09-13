@@ -91,7 +91,13 @@
             for (const chunk of lines) {
               const line = chunk.trim();
               if (line.startsWith("data:")) {
-                const text = line.slice(5).trim().replace(/\\n/g, "\n");
+                // SSE framing puts exactly one space after "data:" — strip only
+                // that one, not a full trim(), or real leading/trailing spaces
+                // inside streamed tokens (e.g. " the", " is") get eaten too,
+                // gluing every word in the reply together.
+                let text = line.slice(5);
+                if (text.startsWith(" ")) text = text.slice(1);
+                text = text.replace(/\\n/g, "\n");
                 if (text.startsWith("[error]")) {
                   replyEl.textContent += "\n" + text;
                 } else {

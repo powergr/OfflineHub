@@ -64,26 +64,78 @@ _FALLBACK_URLS = {
 # ── Offline LLM (onnxruntime-genai model) ────────────────────────────────────
 # Model files ship as several files under one Hugging Face repo path, unlike
 # a ZIM's single file, hence a separate small catalogue + Downloader.download_set().
-# This exact repo/subfolder/file list was verified working end-to-end this
-# session (model loads, tokenizes, and generates real replies) — Hugging Face
-# repos do get reorganized over time, so if this ever starts 404ing, check the
-# repo's current file tree before assuming the code is at fault.
-
-LLM_REPO      = "xiaoyao9184/Qwen2.5-0.5B-Instruct-onnx-genai"
-LLM_SUBFOLDER = "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4"
-LLM_FILES     = [
-    "genai_config.json", "tokenizer.json", "tokenizer_config.json",
-    "special_tokens_map.json", "added_tokens.json", "chat_template.jinja",
-    "model.onnx", "model.onnx.data",
-]
+# Each entry carries its OWN repo/subfolder/file list (rather than one shared
+# constant) because different model repos use different onnx filenames (some
+# ship "model.onnx", others "phi3-mini-4k-instruct-....onnx") and different
+# subfolder layouts. File lists and sizes below were checked live against
+# each repo's file tree this session — Hugging Face repos do get reorganized
+# over time, so if one ever starts 404ing, check that repo's current file
+# tree before assuming the code is at fault. All four are ungated/MIT or
+# Apache-licensed public repos (no HF login/token needed to download).
+#
+# Sizes are ordered smallest-to-largest so the download panel (which lists
+# LLM_CATALOGUE in dict order) shows the easy option first and the heaviest
+# last; "assistant_phi4_mini" is flagged recommended as the best quality/size
+# tradeoff for a typical PC (~5GB disk, 8GB+ RAM).
 
 LLM_CATALOGUE: dict[str, dict] = {
     "assistant_qwen_0_5b": {
-        "name":        "Offline Assistant (Qwen2.5, 0.5B)",
+        "name":        "Offline Assistant — Qwen2.5 0.5B (fastest, smallest)",
+        "emoji":       "🐣",
+        "description": "Tiny and very fast, but answers are noticeably weaker. Good for "
+                        "old/low-RAM PCs or a quick first test — not recommended otherwise.",
+        "size":        873_540_870,
+        "repo":        "xiaoyao9184/Qwen2.5-0.5B-Instruct-onnx-genai",
+        "subfolder":   "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4",
+        "files": [
+            "genai_config.json", "tokenizer.json", "tokenizer_config.json",
+            "special_tokens_map.json", "added_tokens.json", "chat_template.jinja",
+            "model.onnx", "model.onnx.data",
+        ],
+    },
+    "assistant_phi3_mini": {
+        "name":        "Offline Assistant — Phi-3-mini 3.8B (~2.7 GB)",
         "emoji":       "🤖",
-        "description": "A small, fast offline chat assistant. Good for quick Q&A on "
-                        "this machine — not a research tool, and not always accurate.",
-        "size":        873_540_870,  # sum of the real file sizes above, confirmed live
+        "description": "Noticeably smarter than the 0.5B model at a modest size. A good "
+                        "middle ground if you want better answers but limited disk space.",
+        "size":        2_725_547_235,
+        "repo":        "microsoft/Phi-3-mini-4k-instruct-onnx",
+        "subfolder":   "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4",
+        "files": [
+            "added_tokens.json", "config.json", "configuration_phi3.py", "genai_config.json",
+            "phi3-mini-4k-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx",
+            "phi3-mini-4k-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx.data",
+            "special_tokens_map.json", "tokenizer.json", "tokenizer.model", "tokenizer_config.json",
+        ],
+    },
+    "assistant_phi4_mini": {
+        "name":        "Offline Assistant — Phi-4-mini 3.8B (~4.9 GB, recommended)",
+        "emoji":       "⭐",
+        "description": "Newer and noticeably better quality than Phi-3-mini at a similar "
+                        "parameter count. Recommended default for most PCs (~5GB disk, 8GB+ RAM).",
+        "size":        4_930_563_630,
+        "repo":        "microsoft/Phi-4-mini-instruct-onnx",
+        "subfolder":   "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4",
+        "files": [
+            "added_tokens.json", "config.json", "configuration_phi3.py", "genai_config.json",
+            "merges.txt", "model.onnx", "model.onnx.data", "special_tokens_map.json",
+            "tokenizer.json", "tokenizer_config.json", "vocab.json",
+        ],
+    },
+    "assistant_phi3_medium": {
+        "name":        "Offline Assistant — Phi-3-medium 14B (~9.3 GB, largest)",
+        "emoji":       "🏋️",
+        "description": "The best answer quality of these options, but needs a capable "
+                        "PC (16GB+ RAM) and is noticeably slower per reply.",
+        "size":        9_285_363_032,
+        "repo":        "microsoft/Phi-3-medium-4k-instruct-onnx-cpu",
+        "subfolder":   "cpu-int4-rtn-block-32-acc-level-4",
+        "files": [
+            "added_tokens.json", "config.json", "configuration_phi3.py", "genai_config.json",
+            "phi3-medium-4k-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx",
+            "phi3-medium-4k-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx.data",
+            "special_tokens_map.json", "tokenizer.json", "tokenizer.model", "tokenizer_config.json",
+        ],
     },
 }
 
@@ -100,11 +152,12 @@ def llm_download_plan(key: str) -> tuple[list[dict], str]:
     if key not in LLM_CATALOGUE:
         raise CatalogueError(f"Unknown LLM catalogue key: {key!r}")
 
+    entry = LLM_CATALOGUE[key]
     dest_dir = os.path.join(DOWNLOAD_DIR, key)
-    base_url = f"https://huggingface.co/{LLM_REPO}/resolve/main/{LLM_SUBFOLDER}"
+    base_url = f"https://huggingface.co/{entry['repo']}/resolve/main/{entry['subfolder']}"
     files = [
         {"url": f"{base_url}/{fname}", "dest": os.path.join(dest_dir, fname), "checksum": None}
-        for fname in LLM_FILES
+        for fname in entry["files"]
     ]
     return files, dest_dir
 
