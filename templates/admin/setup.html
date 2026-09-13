@@ -1,0 +1,37 @@
+{% extends "admin/base.html" %}
+{% block title %}Setup{% endblock %}
+{% block bare %}
+<div style="width: 640px; max-width: 92vw;">
+  <div class="card">
+    <h1>🏫 Welcome to Offline Hub</h1>
+    <p class="muted">
+      This wizard sets up your local knowledge server. Once configured, users
+      connect to your Wi-Fi hotspot and open any browser — no internet needed.
+    </p>
+  </div>
+
+  <h2>📦 Download Content (optional now — can also be done later)</h2>
+  {% include "admin/_download_panel.html" %}
+
+  <form method="post" action="{{ url_for('admin.setup_finish') }}">
+    <div class="card">
+      <h2 style="margin-top:0">📡 Wi-Fi Hotspot</h2>
+      <label for="ssid">Network Name (SSID)</label>
+      <input type="text" id="ssid" name="ssid" value="{{ config.hotspot.ssid }}" required />
+      <label for="hotspot_password">Wi-Fi Password</label>
+      <input type="text" id="hotspot_password" name="hotspot_password" value="{{ config.hotspot.password }}" required />
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">🔐 Admin Password</h2>
+      <p class="muted">Used to reach this Admin panel later. Choose something only staff know.</p>
+      <label for="admin_password">New Password</label>
+      <input type="password" id="admin_password" name="admin_password" minlength="6" required />
+      <label for="admin_password_confirm">Confirm Password</label>
+      <input type="password" id="admin_password_confirm" name="admin_password_confirm" minlength="6" required />
+    </div>
+
+    <button type="submit" style="width:100%; justify-content:center;">Finish Setup 🎉</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "admin/base.html" %}
+{% block title %}Services{% endblock %}
+{% block content %}
+<h1>🛠 Services</h1>
+<p class="muted">Everything runs in-process now — no separate servers to start or crash. "Unload" just frees the in-memory handle; it reopens automatically on next use.</p>
+
+<div class="card">
+  {% if not modules %}
+    <p class="muted">No modules installed yet.</p>
+  {% else %}
+    {% for folder, data, status in modules %}
+    <div class="row">
+      <div>
+        <div>{{ data.emoji }} {{ data.name }} <span class="muted">({{ data.type }})</span></div>
+        <div class="muted">{{ "⚠ error" if status == "error" else ("● loaded" if status == "loaded" else "○ not yet opened") }}</div>
+      </div>
+      <form method="post" action="{{ url_for('admin.services_unload') }}">
+        <input type="hidden" name="folder" value="{{ folder }}" />
+        <button type="submit" class="secondary" style="margin:0;">Unload</button>
+      </form>
+    </div>
+    {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}

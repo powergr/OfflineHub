@@ -1,10 +1,12 @@
 # Offline Knowledge Hub
 
-A self-contained Windows application that serves Wikipedia, Khan Academy,
-Project Gutenberg, and OpenStreetMap to students over a local Wi-Fi hotspot
-or LAN — no internet required after setup.
+A self-contained Windows application that serves Wikipedia, Project Gutenberg,
+offline maps, and a small offline LLM chat assistant to students over a local
+Wi-Fi hotspot or LAN — no internet required after setup, and no vendor
+binaries to download and place by hand.
 
-The project is **WORK IN PROGRESS**. v0.1.4
+The running version always comes from the [`VERSION`](VERSION) file. See
+[Recent Changes](#recent-changes) at the bottom of this file for what changed.
 
 ---
 
@@ -12,34 +14,39 @@ The project is **WORK IN PROGRESS**. v0.1.4
 
 ```bash
 hub/
-├── main.py                  # Entry point — first-run detection + launch
+├── main.py                  # Entry point — boots the Flask app + tray icon
 ├── requirements.txt
 ├── build.bat                # 1-click build script (Nuitka + Inno Setup)
 ├── installer.iss            # Inno Setup configuration script
-├── config.json              # Default config (installed to C:\OfflineHub)
-│
-├── ui/
-│   ├── app.py               # Main CTk window
-│   ├── admin_panel.py       # Tabbed admin panel
-│   ├── cards.py             # Module card widgets
-│   └── wizard.py            # First-run setup wizard
 │
 ├── core/
-│   ├── module_manager.py    # Install / launch / remove modules
-│   ├── service_manager.py   # Process lifecycle + health checks
-│   ├── downloader.py        # Resumable HTTP downloads + content catalogue
-│   ├── hotspot.py           # Windows hotspot (WinRT + netsh fallback)
-│   ├── portal.py            # Flask landing portal server
-│   └── tileserver.py        # SQLite MBTiles tile server (replaces Node)
+│   ├── app_factory.py       # Builds the single Flask app (portal + admin)
+│   ├── auth.py               # Admin password hashing
+│   ├── registry.py           # Tracks loaded modules' in-process handles
+│   ├── module_manager.py     # Install / remove / open content modules
+│   ├── downloader.py         # Resumable downloads + live Kiwix catalogue
+│   ├── zim_reader.py         # Reads .zim files in-process (libzim)
+│   ├── llm_engine.py         # Small offline chat model (onnxruntime-genai)
+│   ├── tileserver.py         # SQLite MBTiles tile server
+│   ├── hotspot.py            # Windows hotspot (WinRT + netsh fallback)
+│   ├── jobs.py                # Background download/install progress tracking
+│   └── blueprints/
+│       ├── portal.py         # Public, LAN-facing routes (students)
+│       └── admin.py          # Password-gated setup/management routes
 │
-├── assets/
-│   └── portal/
-│       └── index.html       # Student-facing browser portal (MapLibre GL JS)
+├── templates/
+│   ├── portal/               # Student-facing pages (home, ZIM search, chat)
+│   └── admin/                # Setup wizard + ongoing admin pages
 │
-└── vendor/                  # Place third-party binaries here before building
-    ├── kiwix-serve.exe      # Download from https://www.kiwix.org/en/downloads/
-    └── kolibri.exe          # Download from https://learningequality.org/kolibri/
+└── assets/
+    ├── icons/hub.ico
+    └── portal/vendor/maplibre-gl/   # Vendored locally — no CDN at runtime
 ```
+
+There is no `vendor/` folder. Wikipedia/Gutenberg content is read directly
+via the `libzim` Python package, and the offline LLM runs via
+`onnxruntime-genai` — both are plain pip dependencies with real Windows
+wheels, bundled straight into the compiled exe by Nuitka.
 
 ---
 
@@ -49,7 +56,6 @@ hub/
 # 1. Create a virtual environment
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-# or: source .venv/Scripts/activate
 
 # 2. Install dependencies (including Nuitka for building)
 pip install -r requirements.txt
@@ -59,107 +65,58 @@ pip install nuitka
 python main.py
 ```
 
----
-
-## Adding Vendor Binaries
-
-Before building the Setup package, download the required binaries into `vendor/`:
-
-| File              | Source                                                                            |
-| ----------------- | --------------------------------------------------------------------------------- |
-| `kiwix-serve.exe` | [kiwix](https://www.kiwix.org/en/downloads/) → "kiwix-tools" Windows build        |
-| `kolibri.exe`     | [kolibri](https://learningequality.org/kolibri/) → Windows installer, extract EXE |
-
-The Kolibri binary is only required if you plan to serve Khan Academy content
-through Kolibri's channel system. Khan Academy is also available as a Kiwix ZIM
-(served by kiwix-serve) and is the simpler option.
+The first launch opens the setup wizard in your browser at
+`http://127.0.0.1:8000/admin/setup` — no separate desktop window opens
+anymore. A system tray icon (Open Portal / Open Admin / Quit) is the visible
+sign the app is running.
 
 ---
 
-## Building the Installer
+## How Content Works
 
-To avoid Antivirus false-positives (common with PyInstaller), this project uses **Nuitka** to compile the Python code into standard C executables, and **Inno Setup** to package everything into a professional Windows Installer (`.exe`).
+| Module type | Engine | Notes |
+| ----------- | ------ | ----- |
+| `zim`       | `libzim` (in-process) | Wikipedia, Gutenberg, Khan Academy, or any Kiwix ZIM. No subprocess, no port per module. |
+| `mbtiles`   | sqlite (in-process) | Offline vector/raster maps, served straight from the `.mbtiles` file. |
+| `llm`       | `onnxruntime-genai` (in-process) | A small offline chat model. Model weights download like content, not as a vendor binary. |
 
-### Prerequisites for Building
+ZIM downloads are resolved live against Kiwix's OPDS catalog
+(`https://library.kiwix.org/catalog/v2/entries`) instead of a hardcoded
+filename — Kiwix rotates dated snapshot names and deletes old ones, so a
+hardcoded URL eventually 404s. The Admin panel's "Discover Content" search
+box also lets you search the entire live Kiwix library, not just the
+curated quick-start list.
 
-1. **Nuitka & C Compiler**: Installed via `pip install nuitka`. (Nuitka will prompt you to download a MinGW compiler the first time it runs).
-2. **Inno Setup 6**: Download and install from [jrsoftware.org](https://jrsoftware.org/isdl.php). Ensure it installs to `C:\Program Files (x86)\Inno Setup 6\`.
+Khan Academy is deliberately **not** in the curated quick-start list: the
+current Kiwix library only publishes a single ~180GB "all" ZIM for it (no
+small subject-specific version exists anymore). Use the search box if you
+still want it — the real size is shown before you download.
 
-### Build Process
-
-Simply double-click the **`build.bat`** file in the project root, or run it from the terminal:
-
-```powershell
-.\build.bat
-```
-
-**What the build script does:**
-
-1. Compiles `main.py` and its dependencies into a native Windows application folder (`main.dist`).
-2. Triggers Inno Setup to bundle `main.dist`, your `assets/`, `config.json`, and `vendor/` binaries into a single, compressed installer.
-3. Outputs **`OfflineHub_Setup.exe`** into an `Output/` folder.
-
-You only need to distribute `OfflineHub_Setup.exe`. No Python or dependencies are needed on target machines. The uninstaller is programmed to cleanly remove all downloaded content when uninstalled.
-
----
-
-### Installation & First Run on a New Machine
-
-1. Double-click `OfflineHub_Setup.exe`.
-2. Follow the standard Windows installation prompts (Installs safely to `C:\OfflineHub`).
-3. Launch "School Hub" from the newly created Desktop or Start Menu shortcut.
-4. The setup wizard launches automatically on the first run.
-5. Choose content to download (requires internet on first run only).
-6. Set hotspot SSID / password and admin password.
-7. Wait for downloads to complete (large files — plan for hours on slow connections).
-8. Done. Students connect to the hotspot and open any browser.
+Once a module is installed, its Quick Start / Offline Assistant button
+switches to a disabled "✓ Installed" state instead of offering Download
+again — re-downloading over an already-installed module used to fail with a
+raw Windows file-in-use error, since the running app holds that module's
+file open in memory. Installing is also refused server-side for the same
+reason if you ever hit the API directly. Remove the module first (Admin →
+Modules → Remove) if you actually want to replace it.
 
 ---
 
-## Content Catalogue
+## Adding Custom Modules
 
-The setup wizard and Admin Panel provide a 1-click installer for automated starter content:
+Open the **Admin panel** (`/admin`, password-gated) → **Modules**:
 
-| Module                   | Format | Server      | Approx. Size |
-| ------------------------ | ------ | ----------- | ------------ |
-| Wikipedia (English Mini) | `.zim` | kiwix-serve | ~12 GB       |
-| Project Gutenberg        | `.zim` | kiwix-serve | ~15 GB       |
-| Khan Academy (Computing) | `.zim` | kiwix-serve | ~1.8 GB      |
-
-ZIM download URLs are in `core/downloader.py → CATALOGUE`.
-Update them to point to newer Kiwix releases as needed.
-
----
-
-## Adding Custom Modules & Offline Maps
-
-You can easily add new libraries, books, and interactive offline maps directly from the Admin Panel.
-
-### 1. The Easy Way: Raw Files (Magic Installer)
-
-The app features a smart module installer that handles all the complex folder structures for you.
-
-1. Download any `.zim` file from the [Kiwix Library](https://library.kiwix.org).
-2. Download any `.mbtiles` map (Raster or Vector) from [BBBike](https://extract.bbbike.org/) or [MapTiler](https://data.maptiler.com/downloads/europe/).
-3. Open the **Admin Panel** (Ctrl + Shift + A).
-4. Click **📦 Add File (.zim / .mbtiles / .zip)** and select your file.
-
-The app will instantly move the file, generate a readable name, assign an emoji, build the underlying `manifest.json`, and start the background service.
-
-### 2. The Advanced Way: Custom ZIP Modules
-
-If you want granular control over your module (or are deploying Kolibri channels), you can still package files into a ZIP using the standard structure.
-
-**Module folder structure:**
+- **Raw file**: a `.zim` or `.mbtiles` file already on this PC (type a path)
+  or uploaded from another device on the hotspot.
+- **ZIP module**: a `manifest.json` + `content/` folder, zipped up, for
+  granular control:
 
 ```bash
 my_module/
-├── manifest.json        ← required
+├── manifest.json
 └── content/
-    └── myfile.zim       ← or .mbtiles for maps
+    └── myfile.zim       # or .mbtiles, or ONNX model files for type "llm"
 ```
-
-**manifest.json reference:**
 
 ```json
 {
@@ -171,62 +128,156 @@ my_module/
 }
 ```
 
-| Field         | Required | Values                          | Notes                             |
-| ------------- | -------- | ------------------------------- | --------------------------------- |
-| `name`        | ✅       | Any string                      | Displayed as the card title       |
-| `emoji`       | ✅       | Any single emoji                | Displayed next to the title       |
-| `type`        | ✅       | `kiwix` / `kolibri` / `mbtiles` | Controls which server is used     |
-| `format`      | ❌       | `raster` / `vector`             | Used for Maps (`mbtiles`) only    |
-| `description` | ❌       | Any string                      | Shown in smaller text on the card |
+| Field         | Required | Values                    | Notes                          |
+| ------------- | -------- | ------------------------- | ------------------------------- |
+| `name`        | ✅       | Any string                | Card title                      |
+| `emoji`       | ✅       | Any single emoji          | Shown next to the title         |
+| `type`        | ✅       | `zim` / `mbtiles` / `llm` | Controls how content is read    |
+| `format`      | ❌       | `raster` / `vector`       | Maps (`mbtiles`) only           |
+| `description` | ❌       | Any string                | Shown in smaller text on the card |
 
-**Type behaviour:**
+---
 
-- `kiwix` — Starts kiwix-serve automatically when the module is opened.
-- `kolibri` — Looks for a `kolibri.exe` and starts Kolibri with `KOLIBRI_HOME` pointed at the module's subfolder.
-- `mbtiles` — No separate process is started. The Flask server reads the SQLite `.mbtiles` file and streams vector (`.pbf`) or raster (`.png`) tiles directly to the MapLibre GL JS frontend.
+## The Offline LLM
+
+Go to **Admin → Modules → Offline Assistant** and click Download — this
+pulls a small pre-tested model (Qwen2.5 0.5B Instruct, ~0.8GB, verified
+working end-to-end including in the compiled build) straight from Hugging
+Face and installs it as a `type: "llm"` module. Chat with it from the
+student portal at `/chat/<module-id>`.
+
+Any other small instruction-tuned model exported for `onnxruntime-genai`
+works too — e.g. a Phi-3.5-mini ONNX build. Download all of that variant's
+files (`genai_config.json`, `*.onnx`, `*.onnx.data`, tokenizer files) into
+one `content/` folder and package it as a `type: "llm"` ZIP module the same
+way as any other custom module (see above). The curated one-click model is
+defined in `core/downloader.py`'s `LLM_CATALOGUE` / `LLM_REPO` /
+`LLM_SUBFOLDER` if you want to swap in a different default.
+
+Inference runs on CPU and is serialized one request at a time — it's meant
+for a handful of students at once, not a classroom all chatting simultaneously.
 
 ---
 
 ## Testing the Hotspot on Your Laptop
 
-Your laptop can share its existing Wi-Fi connection as a second hotspot network
-simultaneously — Windows calls this **Mobile Hotspot**. Your laptop stays connected
-to your router, and other devices connect to the hub's hotspot instead.
-
-**To test manually (without the app):**
+Your laptop can share its existing Wi-Fi connection as a second hotspot
+network simultaneously — Windows calls this **Mobile Hotspot**.
 
 1. Open **Settings → Network & Internet → Mobile Hotspot**
-2. Set a network name and password
-3. Toggle it on
-4. Connect a phone or another device to that network
-5. On the connected device, open a browser and go to `http://<your-laptop-IP>:8000`
+2. Set a network name and password, toggle it on
+3. Connect another device to that network and open `http://<your-laptop-IP>:8000`
 
-Your laptop IP is shown in the status bar of the hub app, or run `ipconfig` in
-a terminal and look for the **Wi-Fi** adapter address.
+Your laptop's IP is shown on the portal home page, or run `ipconfig` and
+look for the Wi-Fi adapter address.
 
-**Hardware requirement:** your Wi-Fi adapter must support hosted networks (virtually
-all modern adapters do). If the WinRT API fails, the hub automatically falls back
-to the older `netsh wlan hostednetwork` method. If both fail, the error message
-from Windows will appear in the Hotspot tab of the Admin Panel.
+**Hardware requirement:** your Wi-Fi adapter must support hosted networks
+(virtually all modern adapters do). If the WinRT API fails, the hub falls
+back to `netsh wlan hostednetwork`. If both fail, the error appears in the
+Hotspot tab of the Admin panel.
 
 ---
 
 ## Admin Panel
 
-Open with **Ctrl + Shift + A** from the main window.
+Open `http://<hub-ip>:8000/admin` (password-gated after first-run setup).
 
-| Tab      | Purpose                                      |
-| -------- | -------------------------------------------- |
-| Modules  | Download content, add raw files/ZIPs, remove |
-| Hotspot  | Configure SSID / password, toggle hotspot    |
-| Services | View running processes, stop / restart       |
-| Settings | Portal port, boot autostart, change password |
+| Page     | Purpose                                        |
+| -------- | ----------------------------------------------- |
+| Modules  | Download content, add files/ZIPs, remove        |
+| Hotspot  | Configure SSID / password, toggle hotspot       |
+| Services | View loaded modules, unload to free memory      |
+| Settings | Portal port, boot autostart, change password    |
+
+---
+
+## Building the Installer
+
+To avoid antivirus false-positives (common with PyInstaller), this project
+uses **Nuitka** to compile to standard C executables, and **Inno Setup** to
+package everything into a Windows installer.
+
+1. **Nuitka & C Compiler**: `pip install nuitka` (it prompts to download a
+   MinGW compiler on first run).
+2. **Inno Setup 6**: install from [jrsoftware.org](https://jrsoftware.org/isdl.php)
+   to `C:\Program Files (x86)\Inno Setup 6\`.
+
+Run `build.bat`. It compiles `main.py` into `main.dist\`, then packages
+`main.dist\`, `assets\`, and `config.json` into `Output\OfflineHub_Setup.exe`.
+
+`libzim` and `onnxruntime-genai` ship compiled native extensions with
+backing DLLs — after building, **run `main.dist\main.exe` directly**, open a
+ZIM module, and send one chat message before trusting the build. Missing-DLL
+failures from Nuitka's standalone packaging only show up in the frozen exe,
+never when running `python main.py` from source.
 
 ---
 
 ## Architecture Notes
 
-- **Native Map Engine:** The student portal uses MapLibre GL JS, fully supporting both high-definition Raster Maps and compressed Vector Maps without needing Node.js or Mapbox servers.
-- **Fast Shutdown:** Windows process management via `taskkill` ensures instant cleanup of Kiwix background threads when closing the app.
-- **Hotspot** uses the Windows WinRT Mobile Hotspot API first (Win10/11), falling back to `netsh wlan hostednetwork` for older hardware.
-- **Downloads** are resumable — if interrupted, the next attempt picks up from where it left off using HTTP Range headers.
+- **No vendor binaries.** ZIM content and the LLM both run in-process via
+  pip packages with real Windows wheels (`libzim`, `onnxruntime-genai`) —
+  no subprocess management, no missing-exe failures, no antivirus flags on
+  a bundled third-party server binary.
+- **One process.** The student portal and the admin UI are the same Flask
+  app; there's no separate desktop GUI framework to compile or crash.
+- **Fully offline pages.** MapLibre GL JS is vendored locally
+  (`assets/portal/vendor/`) — nothing on the portal fetches from a CDN at
+  runtime, so it genuinely works with zero internet once installed.
+- **Hotspot** uses the Windows WinRT Mobile Hotspot API first (Win10/11),
+  falling back to `netsh wlan hostednetwork` for older hardware.
+- **Downloads are resumable** — interrupted downloads pick up from where
+  they left off using HTTP Range headers.
+
+---
+
+## Recent Changes
+
+Full history isn't tracked in a separate file — this is a running summary,
+newest first. Bump [`VERSION`](VERSION) when the next set of changes ships.
+
+**0.2.1**
+- Added the actual way to get the offline LLM: Admin → Modules → Offline
+  Assistant now downloads a real, pre-tested Qwen2.5 0.5B model in one click
+  (`core/downloader.py`'s `LLM_CATALOGUE`, wired to a new
+  `POST /admin/downloads/llm` route). Previously the LLM engine existed in
+  code but nothing ever exposed a way to install one.
+- Fixed re-downloading an already-installed module (ZIM or LLM) crashing with
+  a raw `WinError 32` ("file in use"): the running app holds that module's
+  file open in memory (libzim keeps ZIM archives open for the process
+  lifetime), so overwriting it mid-process was never going to work. Installed
+  modules now show "✓ Installed" instead of a Download button, and
+  `ModuleManager.install_from_download` / `install_llm_from_download` refuse
+  cleanly with `FileExistsError` if the module folder already exists, instead
+  of attempting the overwrite at all.
+
+**0.2.0** — the vendor-binary-free rewrite
+- Removed `vendor/kiwix-serve.exe` and `vendor/Kolibri.exe` entirely, and all
+  Kolibri support — Kolibri's Windows distribution bundles a full Python
+  runtime and can't run as a standalone extracted exe the way the old README
+  instructed. Khan Academy works as a plain ZIM instead.
+- Removed the whole `ui/` folder (`customtkinter` wizard, admin panel, main
+  window) in favor of one Flask app: `/` is the public student portal,
+  `/admin` is a password-gated setup/management UI, both reachable from any
+  browser on the hotspot. A system tray icon is the visible running/quit
+  signal now that there's no desktop window.
+- Added `core/zim_reader.py` (Wikipedia/Gutenberg/Khan Academy via `libzim`,
+  in-process, no subprocess) and `core/llm_engine.py` (offline chat via
+  `onnxruntime-genai`).
+- Fixed the Wikipedia catalogue URL being hardcoded to a dated snapshot
+  filename Kiwix had already deleted — URLs now resolve live against Kiwix's
+  OPDS catalog.
+- Fixed a closure-over-loop-variable bug in the old setup wizard where
+  selecting several catalogue items at once silently merged/mislabeled all
+  of them into one module folder (`core/jobs.py` binds each download's
+  `job_id` per request instead of sharing loop state across threads).
+- Removed two silent CDN dependencies (a Google-fonts-style import and
+  MapLibre GL JS from unpkg.com) that broke the "works with zero internet"
+  promise on an actual hotspot with no WAN — MapLibre is now vendored
+  locally in `assets/portal/vendor/`.
+- Packaging: a real Nuitka build surfaced three frozen-build-only failures
+  (an invalid `--include-package-data=libzim` flag, `onnxruntime`'s `capi/`
+  extension module being silently dropped, and `onnxruntime-genai.dll`
+  failing to load due to a runtime path-lookup that breaks under a
+  Nuitka-compiled package) — all three are fixed and commented in
+  `build.bat` and `core/llm_engine.py`.

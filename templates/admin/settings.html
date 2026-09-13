@@ -1,0 +1,29 @@
+{% extends "admin/base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>⚙️ Settings</h1>
+
+<form method="post">
+  <div class="card">
+    <label for="portal_port">Portal Port</label>
+    <input type="number" id="portal_port" name="portal_port" value="{{ config.portal_port }}" />
+
+    <label style="display:flex; align-items:center; gap:8px; margin-top:16px;">
+      <input type="checkbox" name="autostart" {{ "checked" if config.autostart }} style="width:auto;" />
+      Start on Windows boot
+    </label>
+
+    <div class="muted" style="margin-top:16px;">Version {{ config.version }}</div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Change Admin Password</h2>
+    <label for="new_password">New Password</label>
+    <input type="password" id="new_password" name="new_password" />
+    <label for="confirm_password">Confirm</label>
+    <input type="password" id="confirm_password" name="confirm_password" />
+  </div>
+
+  <button type="submit">💾 Save All Settings</button>
+</form>
+{% endblock %}

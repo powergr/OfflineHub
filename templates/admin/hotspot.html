@@ -1,0 +1,51 @@
+{% extends "admin/base.html" %}
+{% block title %}Hotspot{% endblock %}
+{% block content %}
+<h1>📡 Wi-Fi Hotspot</h1>
+
+{% if not is_admin %}
+<div class="card" style="border-color:#cc6600">
+  <strong>⚠️ Administrator rights required</strong>
+  <p class="muted">Restart the app as administrator to control the hotspot.</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <form method="post">
+    <label for="ssid">SSID</label>
+    <input type="text" id="ssid" name="ssid" value="{{ config.hotspot.ssid }}" />
+    <label for="password">Password</label>
+    <input type="text" id="password" name="password" value="{{ config.hotspot.password }}" />
+    <button type="submit">💾 Save</button>
+  </form>
+
+  <form method="post" action="{{ url_for('admin.hotspot_toggle') }}" style="display:inline-block; margin-right:8px;">
+    <button type="submit" class="{{ 'secondary' if running else '' }}">
+      {{ "🟢 Stop Hotspot" if running else "▶ Start Hotspot" }}
+    </button>
+  </form>
+
+  <p class="muted">Status: {{ "Running" if running else "Stopped" }} · IP: {{ ip }}</p>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Connected Devices</h2>
+  <div id="devices"><p class="muted">Loading…</p></div>
+  <button class="secondary" onclick="refreshDevices()">🔄 Refresh</button>
+</div>
+
+<script>
+  function refreshDevices() {
+    const box = document.getElementById("devices");
+    box.innerHTML = `<p class="muted">Loading…</p>`;
+    fetch("{{ url_for('admin.hotspot_devices') }}")
+      .then((r) => r.json())
+      .then((data) => {
+        box.innerHTML = data.devices.length
+          ? data.devices.map((d) => `<div class="row">${d}</div>`).join("")
+          : `<p class="muted">No devices connected.</p>`;
+      });
+  }
+  refreshDevices();
+</script>
+{% endblock %}

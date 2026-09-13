@@ -1,0 +1,177 @@
+<div class="card">
+  <h2 style="margin-top:0">📦 Quick Start</h2>
+  <div id="quickstart-list">
+    {% for key, item in quickstart.items() %}
+    <div class="row" id="qs-row-{{ key }}">
+      <div>
+        <div>{{ item.emoji }} {{ item.name }}</div>
+        <div class="muted">
+          {{ item.description }} —
+          {% if item.size %}{{ (item.size / 1073741824) | round(1) }} GB{% else %}size unknown{% endif %}
+          {% if not item.live %}<span title="{{ item.error }}">(using last-known URL, could not reach the live catalogue)</span>{% endif %}
+        </div>
+        <div class="progress" id="qs-progress-{{ key }}" style="display:none"><div></div></div>
+      </div>
+      {% if key in (installed_keys | default([])) %}
+        <button class="btn secondary" disabled>✓ Installed</button>
+      {% else %}
+        <button class="btn" onclick="startQuickstart('{{ key }}')" id="qs-btn-{{ key }}">Download</button>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">🤖 Offline Assistant</h2>
+  <p class="muted">A small chat assistant that runs entirely on this machine — no internet, no cloud.</p>
+  <div id="llm-list">
+    {% for key, item in (llm_catalogue | default({})).items() %}
+    <div class="row" id="llm-row-{{ key }}">
+      <div>
+        <div>{{ item.emoji }} {{ item.name }}</div>
+        <div class="muted">{{ item.description }} — {{ (item.size / 1073741824) | round(1) }} GB</div>
+        <div class="progress" id="llm-progress-{{ key }}" style="display:none"><div></div></div>
+      </div>
+      {% if key in (installed_keys | default([])) %}
+        <button class="btn secondary" disabled>✓ Installed</button>
+      {% else %}
+        <button class="btn" onclick="startLLM('{{ key }}')" id="llm-btn-{{ key }}">Download</button>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">🔎 Discover More Content</h2>
+  <p class="muted">Search the live Kiwix library for anything else (subjects, languages, other wikis).</p>
+  <form onsubmit="return doSearch(event)">
+    <input type="text" id="search-q" placeholder="e.g. wikipedia french, science, khan academy" />
+    <button type="submit" class="secondary">Search</button>
+  </form>
+  <div id="search-results"></div>
+</div>
+
+<script>
+  async function pollJob(jobId, onProgress, onDone) {
+    const poll = async () => {
+      const r = await fetch(`/admin/downloads/${jobId}/status`);
+      const job = await r.json();
+      onProgress(job);
+      if (job.done) { onDone(job); return; }
+      setTimeout(poll, 1000);
+    };
+    poll();
+  }
+
+  function startQuickstart(key) {
+    const btn = document.getElementById(`qs-btn-${key}`);
+    const bar = document.getElementById(`qs-progress-${key}`);
+    btn.disabled = true;
+    bar.style.display = "block";
+
+    fetch("/admin/downloads/quickstart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) { btn.disabled = false; btn.textContent = "Retry"; alert(data.error); return; }
+        pollJob(
+          data.job_id,
+          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
+          (job) => {
+            if (job.success) { btn.textContent = "✓ Installed"; }
+            else { btn.disabled = false; btn.textContent = "Retry"; alert(job.error || "Download failed."); }
+          }
+        );
+      });
+  }
+
+  function startLLM(key) {
+    const btn = document.getElementById(`llm-btn-${key}`);
+    const bar = document.getElementById(`llm-progress-${key}`);
+    btn.disabled = true;
+    bar.style.display = "block";
+
+    fetch("/admin/downloads/llm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) { btn.disabled = false; btn.textContent = "Retry"; alert(data.error); return; }
+        pollJob(
+          data.job_id,
+          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
+          (job) => {
+            if (job.success) { btn.textContent = "✓ Installed"; }
+            else { btn.disabled = false; btn.textContent = "Retry"; alert(job.error || "Download failed."); }
+          }
+        );
+      });
+  }
+
+  function doSearch(e) {
+    e.preventDefault();
+    const q = document.getElementById("search-q").value.trim();
+    const results = document.getElementById("search-results");
+    if (!q) return false;
+    results.innerHTML = `<p class="muted">Searching…</p>`;
+
+    fetch("/admin/downloads/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) { results.innerHTML = `<p class="muted">${data.error}</p>`; return; }
+        if (!data.results.length) { results.innerHTML = `<p class="muted">No results.</p>`; return; }
+
+        results.innerHTML = "";
+        data.results.forEach((item, i) => {
+          const gb = (item.size / 1073741824).toFixed(1);
+          const row = document.createElement("div");
+          row.className = "row";
+          row.innerHTML = `
+            <div>
+              <div>${item.title}${item.flavour ? " (" + item.flavour + ")" : ""}</div>
+              <div class="muted">${item.language} · ${item.article_count.toLocaleString()} articles · ${gb} GB</div>
+              <div class="progress" id="sr-progress-${i}" style="display:none"><div></div></div>
+            </div>
+            <button class="btn" id="sr-btn-${i}" onclick='startCustom(${i}, ${JSON.stringify(item)})'>Download</button>`;
+          results.appendChild(row);
+        });
+      });
+    return false;
+  }
+
+  function startCustom(i, item) {
+    const btn = document.getElementById(`sr-btn-${i}`);
+    const bar = document.getElementById(`sr-progress-${i}`);
+    btn.disabled = true;
+    bar.style.display = "block";
+
+    fetch("/admin/downloads/custom", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: item.title, url: item.url, size: item.size, summary: item.summary }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) { btn.disabled = false; btn.textContent = "Retry"; alert(data.error); return; }
+        pollJob(
+          data.job_id,
+          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
+          (job) => {
+            if (job.success) { btn.textContent = "✓ Installed"; }
+            else { btn.disabled = false; btn.textContent = "Retry"; alert(job.error || "Download failed."); }
+          }
+        );
+      });
+  }
+</script>

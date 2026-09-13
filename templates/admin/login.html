@@ -1,0 +1,13 @@
+{% extends "admin/base.html" %}
+{% block title %}Login{% endblock %}
+{% block bare %}
+<div class="card" style="width: 340px;">
+  <h1>🔐 Admin Login</h1>
+  {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+  <form method="post">
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" autofocus required />
+    <button type="submit" style="width:100%; justify-content:center;">Log In</button>
+  </form>
+</div>
+{% endblock %}

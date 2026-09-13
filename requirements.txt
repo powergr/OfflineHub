@@ -1,10 +1,10 @@
-# Offline School Knowledge Hub — Python dependencies
+# Offline Knowledge Hub — Python dependencies
 # Install with: pip install -r requirements.txt
 
-customtkinter>=5.2.2
 requests>=2.31.0
-flask>=3.0.0
-werkzeug>=3.0.0
-bcrypt>=4.1.0          # used via hashlib.pbkdf2_hmac — bcrypt kept for reference
-pywin32>=306           # Windows registry + service registration
-pyinstaller>=6.3.0     # EXE builder (dev only, not needed at runtime)
+flask>=3.1.0
+werkzeug>=3.1.0
+libzim>=3.13.0            # reads .zim files in-process — no kiwix-serve.exe needed
+onnxruntime-genai>=0.15.2 # small offline LLM inference — no vendor binary needed
+pystray>=0.19.5           # system tray icon (Open Portal / Open Admin / Quit)
+Pillow>=12.0.0             # tray icon image loading

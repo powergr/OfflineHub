@@ -1,0 +1,43 @@
+{% extends "admin/base.html" %}
+{% block title %}Modules{% endblock %}
+{% block content %}
+<h1>📦 Modules</h1>
+
+<div class="card">
+  <h2 style="margin-top:0">Installed</h2>
+  {% if not installed %}
+    <p class="muted">No modules installed yet.</p>
+  {% else %}
+    {% for folder, data, status in installed %}
+    <div class="row">
+      <div>
+        <div>{{ data.emoji }} {{ data.name }} <span class="muted">({{ data.type }})</span></div>
+        <div class="muted">{{ data.description }}</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span class="muted">{{ "⚠ error" if status == "error" else "● ready" }}</span>
+        <form method="post" action="{{ url_for('admin.modules_remove') }}"
+              onsubmit="return confirm('Remove {{ data.name }}? This deletes its files.');">
+          <input type="hidden" name="folder" value="{{ folder }}" />
+          <button type="submit" class="danger" style="margin:0;">Remove</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  {% endif %}
+</div>
+
+{% include "admin/_download_panel.html" %}
+
+<div class="card">
+  <h2 style="margin-top:0">Manual Install</h2>
+  <p class="muted">A .zim / .mbtiles file already on this PC, or a legacy .zip module (manifest.json + content/).</p>
+  <form method="post" action="{{ url_for('admin.modules_install') }}" enctype="multipart/form-data">
+    <label for="filepath">File path on this PC</label>
+    <input type="text" id="filepath" name="filepath" placeholder="C:\Downloads\my_library.zim" />
+    <label for="file">…or upload a file (works from another device on the hotspot)</label>
+    <input type="file" id="file" name="file" accept=".zim,.mbtiles,.zip" />
+    <button type="submit">Install</button>
+  </form>
+</div>
+{% endblock %}

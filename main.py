@@ -1,66 +1,122 @@
 """
-Offline Knowledge Hub — Entry Point
-Handles first-run detection and launches the correct UI flow.
+Offline Knowledge Hub — Entry Point.
+
+No customtkinter, no GUI event loop. Boots one Flask app (student portal +
+admin UI, see core/app_factory.py) and runs it with a system tray icon as
+the visible running/quit signal, since there's no window anymore.
 """
 
+import json
 import os
 import sys
-import json
+import threading
+import webbrowser
 
-# ── Ensure C:\OfflineHub directory tree exists ──────────────────────────────
-BASE_DIR     = r"C:\OfflineHub"
-MODULES_DIR  = os.path.join(BASE_DIR, "modules")
-BIN_DIR      = os.path.join(BASE_DIR, "bin")
-CONFIG_PATH  = os.path.join(BASE_DIR, "config.json")
+from core.version import get_version
 
-for d in (BASE_DIR, MODULES_DIR, BIN_DIR):
+BASE_DIR    = r"C:\OfflineHub"
+MODULES_DIR = os.path.join(BASE_DIR, "modules")
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+
+for d in (BASE_DIR, MODULES_DIR):
     os.makedirs(d, exist_ok=True)
 
-# NOTE: extract_vendor() has been removed. 
-# The Setup.exe installer now securely handles placing vendor binaries into BIN_DIR.
-
-# ── Default config ────────────────────────────────────────────────────────────
 DEFAULT_CONFIG = {
     "first_run": True,
-    "version": "0.1.3",
-    "admin_password_hash": "",          
+    "version": get_version(),
+    "admin_password_hash": "",
+    "secret_key": "",
     "hotspot": {
         "ssid": "OfflineHub",
         "password": "offlinehub2026",
-        "enabled": False
+        "enabled": False,
     },
     "portal_port": 8000,
     "autostart": False,
-    "modules": {}
+    "modules": {},
 }
 
-def load_config():
+
+def load_config() -> dict:
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, encoding="utf-8") as f:
             data = json.load(f)
         for k, v in DEFAULT_CONFIG.items():
             data.setdefault(k, v)
+        data["version"] = get_version()  # always reflect the running build, not a stale value
         return data
     return dict(DEFAULT_CONFIG)
+
 
 def save_config(cfg: dict):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
 
-# ── Launch ────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    import customtkinter as ctk
+
+def _icon_path() -> str:
+    if getattr(sys, "frozen", False):
+        root = os.path.dirname(sys.executable)
+    else:
+        root = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(root, "assets", "icons", "hub.ico")
+
+
+def _build_tray(config: dict, server, hotspot_mgr, registry):
+    import pystray
+    from PIL import Image
+
+    image = Image.open(_icon_path())
+    base_url = f"http://127.0.0.1:{config.get('portal_port', 8000)}"
+
+    def open_portal(icon, item):
+        webbrowser.open(base_url + "/")
+
+    def open_admin(icon, item):
+        webbrowser.open(base_url + "/admin")
+
+    def quit_app(icon, item):
+        icon.stop()
+        try:
+            registry.unload_all()
+        except Exception:
+            pass
+        try:
+            hotspot_mgr.stop()
+        except Exception:
+            pass
+        server.shutdown()
+
+    menu = pystray.Menu(
+        pystray.MenuItem("Open Portal", open_portal, default=True),
+        pystray.MenuItem("Open Admin", open_admin),
+        pystray.MenuItem("Quit", quit_app),
+    )
+    return pystray.Icon("OfflineHub", image, "Offline Knowledge Hub", menu)
+
+
+def main():
+    from werkzeug.serving import make_server
+
+    from core.app_factory import create_app
 
     config = load_config()
+    app = create_app(config, save_config)
 
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("blue")
+    if config["hotspot"].get("enabled"):
+        threading.Thread(target=app.config["HOTSPOT_MGR"].start, daemon=True).start()
 
-    if config.get("first_run", True):
-        from ui.wizard import SetupWizard
-        app = SetupWizard(config, save_config)
-    else:
-        from ui.app import OfflineHub
-        app = OfflineHub(config, save_config)
+    port = config.get("portal_port", 8000)
+    server = make_server("0.0.0.0", port, app, threaded=True)
 
-    app.mainloop()
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+
+    landing = "/admin/setup" if config.get("first_run", True) else "/"
+    webbrowser.open(f"http://127.0.0.1:{port}{landing}")
+
+    tray = _build_tray(config, server, app.config["HOTSPOT_MGR"], app.config["REGISTRY"])
+    tray.run()  # blocks until Quit is chosen; server_thread is a daemon so process exits with it
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}Admin{% endblock %} — Offline Hub</title>
+    <style>
+      :root {
+        --bg: #0d1117; --surface: #161b22; --surface2: #1c2128; --border: #30363d;
+        --accent: #2ea043; --accent2: #1f6feb; --danger: #f85149;
+        --text: #e6edf3; --muted: #8b949e; --radius: 12px;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: var(--bg); color: var(--text);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      a { color: #58a6ff; }
+      .shell { display: flex; min-height: 100vh; }
+      nav {
+        width: 220px; flex-shrink: 0; background: var(--surface);
+        border-right: 1px solid var(--border); padding: 20px 14px; display: flex; flex-direction: column; gap: 4px;
+      }
+      nav .brand { font-weight: 700; padding: 8px 10px 18px; }
+      nav a {
+        display: block; padding: 10px 12px; border-radius: 8px; color: var(--text);
+        text-decoration: none; font-size: 14px;
+      }
+      nav a:hover { background: var(--surface2); }
+      nav a.active { background: var(--accent2); color: #fff; }
+      nav .spacer { flex: 1; }
+      main { flex: 1; padding: 32px 40px; max-width: 900px; }
+      h1 { font-size: 22px; margin: 0 0 20px; }
+      h2 { font-size: 16px; margin: 28px 0 12px; }
+      .card {
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 20px; margin-bottom: 16px;
+      }
+      label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; margin-top: 14px; }
+      input[type=text], input[type=password], input[type=number] {
+        width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+        background: var(--surface2); color: var(--text); font-size: 14px;
+      }
+      button, .btn {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 10px 18px; border-radius: 8px; border: none;
+        background: var(--accent2); color: #fff; font-weight: 600; font-size: 14px;
+        cursor: pointer; text-decoration: none; margin-top: 16px;
+      }
+      button.secondary, .btn.secondary { background: var(--surface2); border: 1px solid var(--border); }
+      button.danger, .btn.danger { background: #3a1a1a; color: var(--danger); border: 1px solid #f8514933; }
+      button:disabled { opacity: .5; cursor: not-allowed; }
+      .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+      .row:last-child { border-bottom: none; }
+      .muted { color: var(--muted); font-size: 13px; }
+      .flashes { margin-bottom: 20px; }
+      .flash { padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 8px; }
+      .flash-success { background: #1a3326; color: #3fb950; border: 1px solid #2ea04333; }
+      .flash-error { background: #3a1a1a; color: var(--danger); border: 1px solid #f8514933; }
+      .progress { height: 8px; border-radius: 4px; background: var(--surface2); overflow: hidden; margin-top: 8px; }
+      .progress > div { height: 100%; background: var(--accent2); width: 0%; transition: width .2s ease; }
+      .bare-wrap { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    </style>
+    {% block head %}{% endblock %}
+  </head>
+  <body>
+    {% if session.get('admin_authed') %}
+    <div class="shell">
+      <nav>
+        <div class="brand">🏫 Offline Hub</div>
+        <a href="{{ url_for('admin.modules') }}" class="{{ 'active' if request.endpoint == 'admin.modules' }}">📦 Modules</a>
+        <a href="{{ url_for('admin.hotspot') }}" class="{{ 'active' if request.endpoint == 'admin.hotspot' }}">📡 Hotspot</a>
+        <a href="{{ url_for('admin.services') }}" class="{{ 'active' if request.endpoint == 'admin.services' }}">🛠 Services</a>
+        <a href="{{ url_for('admin.settings') }}" class="{{ 'active' if request.endpoint == 'admin.settings' }}">⚙️ Settings</a>
+        <div class="spacer"></div>
+        <a href="/" target="_blank">🌐 View Portal</a>
+        <a href="{{ url_for('admin.logout') }}">🚪 Logout</a>
+      </nav>
+      <main>
+        {% include "admin/_flashes.html" %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+    {% else %}
+    <div class="bare-wrap">
+      {% include "admin/_flashes.html" %}
+      {% block bare %}{% endblock %}
+    </div>
+    {% endif %}
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

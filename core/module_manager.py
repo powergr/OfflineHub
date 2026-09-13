@@ -1,31 +1,37 @@
 """
-ModuleManager — install, list, remove, and launch content modules.
+ModuleManager — install, list, remove, and open content modules.
+
+No subprocesses. `zim` modules are opened in-process via ZimReader (libzim),
+`mbtiles` modules are read in-process by TileServer (sqlite), and `llm`
+modules are opened in-process via LLMEngine (onnxruntime-genai). There is no
+vendor binary of any kind involved.
 """
 
-import os
-import sys
 import glob
 import json
-import socket
-import webbrowser
+import os
 import shutil
-from shutil import copytree, rmtree, copy2
+from shutil import copy2, rmtree
 
-# Resolved at runtime by main.py bootstrapping
+from core.registry import ContentRegistry
+from core.zim_reader import ZimReader
+
 BASE_DIR    = r"C:\OfflineHub"
 MODULES_DIR = os.path.join(BASE_DIR, "modules")
-BIN_DIR     = os.path.join(BASE_DIR, "bin")
+
+VALID_TYPES = {"zim", "mbtiles", "llm"}
 
 
 class ModuleManager:
 
-    def __init__(self, service_mgr):
-        self.service_mgr = service_mgr
+    def __init__(self, registry: ContentRegistry):
+        self.registry = registry
+        self._llm_loaded_module: str | None = None
 
     # ── Listing ───────────────────────────────────────────────────────────────
 
     def list_modules(self) -> list[tuple[str, dict]]:
-        results =[]
+        results = []
         if not os.path.isdir(MODULES_DIR):
             return results
         for folder in sorted(os.listdir(MODULES_DIR)):
@@ -39,85 +45,74 @@ class ModuleManager:
                     print(f"[WARNING] Skipping module '{folder}': invalid manifest.json ({e})")
         return results
 
-    # ── Install ───────────────────────────────────────────────────────────────
+    def get_manifest(self, folder: str) -> dict | None:
+        manifest_path = os.path.join(MODULES_DIR, folder, "manifest.json")
+        if not os.path.exists(manifest_path):
+            return None
+        with open(manifest_path, encoding="utf-8") as f:
+            return json.load(f)
+
+    # ── Install: raw file / zip / catalogue download ────────────────────────────
 
     def install_from_raw_file(self, filepath: str):
-        """
-        MAGIC INSTALLER: Takes a raw .zim or .mbtiles file, figures out the name,
-        builds the folder structure, generates the manifest, and launches it.
-        """
+        """MAGIC INSTALLER: a raw .zim or .mbtiles file -> folder + manifest."""
         filename = os.path.basename(filepath)
         basename, ext = os.path.splitext(filename)
         ext = ext.lower()
 
-        if ext not in [".zim", ".mbtiles"]:
+        if ext not in (".zim", ".mbtiles"):
             raise ValueError(f"Unsupported file type '{ext}'. Please select a .zim or .mbtiles file.")
 
-        mod_type = "kiwix" if ext == ".zim" else "mbtiles"
-        
-        # 1. Clean up the filename to make a readable title
+        mod_type = "zim" if ext == ".zim" else "mbtiles"
+
         clean_name = basename.replace("_", " ").title()
-        
-        # 2. Smart Emoji Guesser
+
         emoji = "📦"
         lower_name = basename.lower()
         if "wikipedia" in lower_name: emoji = "📚"
         elif "gutenberg" in lower_name: emoji = "📖"
-        elif "khan" in lower_name or "kolibri" in lower_name: emoji = "🎓"
+        elif "khan" in lower_name: emoji = "🎓"
         elif ext == ".mbtiles": emoji = "🗺️"
 
-        # 3. Create a safe folder name
-        safe_name = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in basename).strip()
+        safe_name = _safe_name(basename)
         dest_dir = os.path.join(MODULES_DIR, safe_name)
-        
         if os.path.exists(dest_dir):
             raise FileExistsError(f"Module '{safe_name}' is already installed.")
 
-        # 4. Build the folder structure
         content_dir = os.path.join(dest_dir, "content")
         os.makedirs(content_dir, exist_ok=True)
 
-        # 5. Move the massive file instantly (instead of copying, which takes forever)
         dest_file = os.path.join(content_dir, filename)
         shutil.move(filepath, dest_file)
 
-        # 6. Copy kiwix-serve.exe if needed
-        if mod_type == "kiwix":
-            self._ensure_kiwix(dest_dir)
-
-        # 7. Auto-generate the manifest.json
         manifest = {
             "name": clean_name,
             "emoji": emoji,
             "type": mod_type,
-            "description": f"Imported automatically from {filename}"
+            "description": f"Imported automatically from {filename}",
         }
-        
         if mod_type == "mbtiles":
             manifest["format"] = "vector" if "vector" in lower_name else "raster"
 
         with open(os.path.join(dest_dir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
 
-        # 8. Start it up!
-        self.launch_module(safe_name, manifest)
-
+        self.open_module(safe_name, manifest)
 
     def install_from_zip(self, zip_path: str):
-        """Safely extracts a ZIP file and installs the module."""
-        import zipfile
+        """Extracts a ZIP (manifest.json + content/) and installs the module."""
         import tempfile
+        import zipfile
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(temp_dir)
 
             manifest_dir = None
-            for root, dirs, files in os.walk(temp_dir):
+            for root, _dirs, files in os.walk(temp_dir):
                 if "manifest.json" in files:
                     manifest_dir = root
                     break
-
             if not manifest_dir:
                 raise FileNotFoundError("Invalid ZIP: 'manifest.json' not found inside.")
 
@@ -128,140 +123,148 @@ class ModuleManager:
             except Exception as e:
                 raise ValueError(f"manifest.json is corrupted or invalid JSON. Error: {e}")
 
-            raw_name = data.get("name", "Custom Module")
-            safe_name = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in raw_name).strip()
-            
+            mod_type = data.get("type", "zim")
+            if mod_type not in VALID_TYPES:
+                raise ValueError(
+                    f"Unknown module type '{mod_type}'. Must be one of: {', '.join(sorted(VALID_TYPES))}."
+                )
+
+            safe_name = _safe_name(data.get("name", "Custom Module"))
             dest = os.path.join(MODULES_DIR, safe_name)
             if os.path.exists(dest):
                 raise FileExistsError(f"Module '{safe_name}' is already installed.")
 
             shutil.copytree(manifest_dir, dest)
-
-            if data.get("type", "kiwix") == "kiwix":
-                self._ensure_kiwix(dest)
-
-            self.launch_module(safe_name, data)
+            self.open_module(safe_name, data)
 
     def install_from_download(self, key: str, item: dict, downloaded_path: str):
+        """A single-file catalogue download (ZIM) finished — install it as a module."""
         mod_dir = os.path.join(MODULES_DIR, key)
+        if os.path.exists(mod_dir):
+            raise FileExistsError(
+                f"'{key}' is already installed. Remove it first if you want to replace it."
+            )
         os.makedirs(os.path.join(mod_dir, "content"), exist_ok=True)
 
         dest_file = os.path.join(mod_dir, "content", os.path.basename(downloaded_path))
         if downloaded_path != dest_file:
             copy2(downloaded_path, dest_file)
 
-        if item.get("server") == "kiwix":
-            self._ensure_kiwix(mod_dir)
-
         manifest = {
             "name":        item["name"],
             "emoji":       item["emoji"],
-            "type":        item.get("server", "kiwix"),
+            "type":        "zim",
             "description": item.get("description", ""),
         }
         with open(os.path.join(mod_dir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
 
-    def add_from_folder(self, src_folder: str):
-        pass # Replaced by install_from_zip and install_from_raw_file
+        self.open_module(key, manifest)
 
-    def _ensure_kiwix(self, mod_dir: str):
-        kiwix_bin = os.path.join(BIN_DIR, "kiwix-serve.exe")
-        dest      = os.path.join(mod_dir, "kiwix-serve.exe")
-        if os.path.exists(kiwix_bin) and not os.path.exists(dest):
-            copy2(kiwix_bin, dest)
+    def install_llm_from_download(self, key: str, item: dict, downloaded_dir: str):
+        """A multi-file LLM model download finished — install it as an llm module."""
+        mod_dir = os.path.join(MODULES_DIR, key)
+        if os.path.exists(mod_dir):
+            raise FileExistsError(
+                f"'{key}' is already installed. Remove it first if you want to replace it."
+            )
+        content_dir = os.path.join(mod_dir, "content")
+        os.makedirs(mod_dir, exist_ok=True)
+
+        if downloaded_dir != content_dir:
+            shutil.move(downloaded_dir, content_dir)
+
+        manifest = {
+            "name":        item["name"],
+            "emoji":       item.get("emoji", "🤖"),
+            "type":        "llm",
+            "description": item.get("description", ""),
+        }
+        with open(os.path.join(mod_dir, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+
+        self.registry.register(key, "llm")
 
     # ── Remove ────────────────────────────────────────────────────────────────
 
     def remove(self, folder_path: str):
         name = os.path.basename(folder_path.rstrip("/\\"))
-        self.service_mgr.stop(name)
+        self.registry.unload(name)
+        if name == self._llm_loaded_module:
+            self._llm_loaded_module = None
         rmtree(folder_path)
 
-    # ── Launch ────────────────────────────────────────────────────────────────
+    # ── Open (in-process, no subprocess) ─────────────────────────────────────
 
-    def launch_module(self, folder: str, data: dict) -> tuple[int | None, str | None]:
-        status = self.service_mgr.get_status(folder)
-        if status != "running":
-            ok, err = self._start_service(folder, data)
-            if not ok:
-                return None, err
+    def open_module(self, folder: str, data: dict):
+        """Validate + register a module right after install so the admin UI
+        can immediately show it as loaded rather than waiting for first use."""
+        mod_type = data.get("type")
+        path = os.path.join(MODULES_DIR, folder)
 
-        port = self.service_mgr.get_port(folder)
-        
-        if port and data.get("type") != "mbtiles":
-            import time
-            for _ in range(20):
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    if s.connect_ex(("127.0.0.1", port)) == 0:
-                        break
-                time.sleep(0.5)
-
-        return port, None
-
-    def _start_service(self, folder: str, data: dict) -> tuple[bool, str | None]:
-        mod_type = data.get("type", "kiwix")
-        path     = os.path.join(MODULES_DIR, folder)
-
-        if mod_type == "kiwix":
-            return self._start_kiwix(folder, path)
-        elif mod_type == "kolibri":
-            return self._start_kolibri(folder, path)
+        if mod_type == "zim":
+            self.get_zim_reader(folder)
         elif mod_type == "mbtiles":
-            self.service_mgr.register_virtual(folder, 8082)
-            return True, None
-        return False, f"Unknown module type: '{mod_type}'"
+            mbtiles = glob.glob(os.path.join(path, "**", "*.mbtiles"), recursive=True)
+            if not mbtiles:
+                self.registry.mark_error(folder, "No .mbtiles file found in module folder.")
+            else:
+                self.registry.register(folder, "mbtiles")
+        elif mod_type == "llm":
+            self.registry.register(folder, "llm")
+        else:
+            self.registry.mark_error(folder, f"Unknown module type: '{mod_type}'")
 
-    def _start_kiwix(self, folder: str, path: str):
-        import subprocess
+    def get_zim_reader(self, folder: str) -> ZimReader:
+        """Return the cached ZimReader for `folder`, opening it on first use."""
+        existing = self.registry.get_handle(folder)
+        if existing is not None:
+            return existing
 
-        exe = glob.glob(os.path.join(path, "**", "kiwix-serve*.exe"), recursive=True)
-        if not exe:
-            bin_exe = os.path.join(BIN_DIR, "kiwix-serve.exe")
-            if os.path.exists(bin_exe):
-                exe = [bin_exe]
-
+        path = os.path.join(MODULES_DIR, folder)
         zims = glob.glob(os.path.join(path, "**", "*.zim"), recursive=True)
-
-        if not exe:
-            return False, ("kiwix-serve.exe not found.")
-
         if not zims:
-            return False, ("No .zim file found in module folder.")
+            self.registry.mark_error(folder, "No .zim file found in module folder.")
+            raise FileNotFoundError(f"No .zim file found for module '{folder}'.")
 
-        port = _free_port(8081)
-        cmd  = [exe[0], f"--port={port}"] + zims
-        proc = subprocess.Popen(
-            cmd, cwd=path,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        self.service_mgr.register(folder, proc, port)
-        return True, None
+        try:
+            reader = ZimReader(zims[0])
+        except Exception as e:
+            self.registry.mark_error(folder, str(e))
+            raise
 
-    def _start_kolibri(self, folder: str, path: str):
-        import subprocess
-        exe = glob.glob(os.path.join(path, "**", "kolibri*.exe"), recursive=True)
-        if not exe:
-            return False, "kolibri.exe not found"
+        self.registry.register(folder, "zim", handle=reader)
+        return reader
 
-        port = _free_port(8080)
-        env  = os.environ.copy()
-        env["KOLIBRI_HOME"] = os.path.join(path, "kolibri_home")
-        cmd  =[exe[0], "start", "--port", str(port), "--foreground"]
-        proc = subprocess.Popen(cmd, cwd=path, env=env,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL)
-        self.service_mgr.register(folder, proc, port)
-        return True, None
+    def get_llm_engine(self, folder: str):
+        """
+        Return the cached LLMEngine for `folder`, loading it on first use.
+        Only one LLM model is kept resident at a time — loading a different
+        one unloads whichever was previously loaded.
+        """
+        from core.llm_engine import LLMEngine  # imported lazily: heavy dependency
+
+        existing = self.registry.get_handle(folder)
+        if existing is not None:
+            return existing
+
+        if self._llm_loaded_module and self._llm_loaded_module != folder:
+            self.registry.unload(self._llm_loaded_module)
+
+        path = os.path.join(MODULES_DIR, folder, "content")
+        try:
+            engine = LLMEngine(path)
+            engine.load()
+        except Exception as e:
+            self.registry.mark_error(folder, str(e))
+            raise
+
+        self.registry.register(folder, "llm", handle=engine)
+        self._llm_loaded_module = folder
+        return engine
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────
 
-def _free_port(start: int = 8081) -> int:
-    for port in range(start, start + 200):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(("127.0.0.1", port)) != 0:
-                return port
-    return start
+def _safe_name(raw: str) -> str:
+    return "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in raw).strip()
