@@ -71,6 +71,7 @@
         <a href="{{ url_for('admin.modules') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.modules' }}"><span class="ic">📦</span> Modules</a>
         <a href="{{ url_for('admin.hotspot') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.hotspot' }}"><span class="ic">📡</span> Hotspot</a>
         <a href="{{ url_for('admin.services') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.services' }}"><span class="ic">🛠</span> Services</a>
+        <a href="{{ url_for('admin.help_page') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.help_page' }}"><span class="ic">❓</span> Help</a>
         <a href="{{ url_for('admin.settings') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.settings' }}"><span class="ic">⚙️</span> Settings</a>
         <div class="spacer"></div>
         <div class="nav-divider"></div>
@@ -83,11 +84,28 @@
       </nav>
       <main>
         <div class="page">
+          <div id="update-banner" hidden style="background: var(--surface3); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 16px; margin-bottom: 18px; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+            <span>🔔 A newer version (<strong id="update-version"></strong>) is available.</span>
+            <a id="update-link" href="#" target="_blank" class="btn secondary" style="width: auto;">View Release</a>
+          </div>
           {% include "admin/_flashes.html" %}
           {% block content %}{% endblock %}
         </div>
       </main>
     </div>
+    <script>
+      fetch("{{ url_for('admin.updates_check') }}")
+        .then((r) => r.json())
+        .then((data) => {
+          if (!data.available || !data.version) return;
+          document.getElementById("update-version").textContent = "v" + data.version;
+          document.getElementById("update-link").href = data.url;
+          const banner = document.getElementById("update-banner");
+          banner.hidden = false;
+          banner.style.display = "flex";
+        })
+        .catch(() => {});
+    </script>
     {% else %}
     <div class="bare-wrap">
       {% include "admin/_flashes.html" %}

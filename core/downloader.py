@@ -8,13 +8,17 @@ replaces it), so URLs are resolved live against Kiwix's OPDS v2 catalog
 (https://library.kiwix.org/catalog/v2/entries) instead of being hardcoded.
 """
 
+import errno
 import hashlib
+import logging
 import os
 import threading
 import xml.etree.ElementTree as ET
 from typing import Callable
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR     = r"C:\OfflineHub"
 MODULES_DIR  = os.path.join(BASE_DIR, "modules")
@@ -92,6 +96,20 @@ CATALOGUE: dict[str, dict] = {
         "server":      "zim",
     },
 }
+
+# Recommended "install everything a normal school wants" default, used by
+# the single "Install Starter Bundle" button so a new admin doesn't have to
+# individually evaluate all six Quick Start cards on day one. Deliberately
+# NOT wikipedia_en_mini - checked its real live-resolved size while picking
+# this list and "mini" is still ~12GB (no images, but still every article),
+# a surprising default for a "day one, don't think about it" button.
+# wikipedia_en_simple (~450MB, Simple English's much smaller article set)
+# + gutenberg literature + a kids' encyclopedia + a small dictionary
+# together land around ~1.2GB - a sensible default that still covers
+# general reference, literature, and a younger-reader-friendly source.
+STARTER_BUNDLE_KEYS: list[str] = [
+    "wikipedia_en_simple", "gutenberg_lcc_l", "vikidia_en", "wiktionary_en_simple",
+]
 
 # Last-known-good fallback, used only if the live OPDS lookup fails (e.g. no
 # internet at that moment, or the API changes shape). May go stale over time
@@ -367,7 +385,15 @@ class Downloader:
     Thread-safe, resumable HTTP downloader.
 
     progress_cb(pct: float, speed_kbps: float)
-    done_cb(success: bool, path: str)
+    done_cb(success: bool, path: str, error: str | None = None)
+
+    On failure, `error` is a plain-English message (not a raw traceback) -
+    e.g. disk-full is reported as "Not enough disk space..." rather than
+    whatever OSError.__str__ happens to say. The partially-downloaded
+    `.part` file is deliberately left in place on any I/O/network failure
+    (as opposed to the checksum-mismatch case below, where it's deleted
+    because it's actively wrong) so a later retry can resume from where it
+    stopped instead of re-downloading from zero.
     """
 
     def download(
@@ -416,7 +442,8 @@ class Downloader:
                 if not _verify_sha256(part_file, checksum):
                     os.remove(part_file)
                     if done_cb:
-                        done_cb(False, dest)
+                        done_cb(False, dest, "Downloaded file failed checksum verification "
+                                             "- it may be corrupted. Try downloading again.")
                     return
 
             if os.path.exists(dest):
@@ -427,9 +454,10 @@ class Downloader:
                 done_cb(True, dest)
 
         except Exception as exc:
-            print(f"[Downloader] Error downloading {url}: {exc}")
+            message = _friendly_error(exc)
+            logger.error("Error downloading %s: %s", url, exc)
             if done_cb:
-                done_cb(False, dest)
+                done_cb(False, dest, message)
 
     def download_set(
         self,
@@ -448,25 +476,45 @@ class Downloader:
 
         for i, f in enumerate(files):
             file_failed = []
+            file_error = []
 
             def file_progress(pct, speed_kbps, i=i):
                 overall = (i + pct / 100) / total_files * 100
                 if progress_cb:
                     progress_cb(overall, speed_kbps)
 
-            def file_done(success, path):
+            def file_done(success, path, error=None):
                 if not success:
                     file_failed.append(True)
+                    file_error.append(error)
 
             self.download(f["url"], f["dest"], file_progress, file_done, f.get("checksum"))
 
             if file_failed:
                 if done_cb:
-                    done_cb(False, dest_dir)
+                    done_cb(False, dest_dir, file_error[0] if file_error else None)
                 return
 
         if done_cb:
             done_cb(True, dest_dir)
+
+
+def _friendly_error(exc: Exception) -> str:
+    """
+    Turns a raw exception into a plain-English message a non-technical
+    school admin can act on, instead of a Python traceback. Disk-full is
+    the specific case this was written for (OSError.__str__ for ENOSPC is
+    just "[Errno 28] No space left on device: '...'"), but network errors
+    get a friendlier prefix too since requests' own messages are verbose.
+    """
+    if isinstance(exc, OSError):
+        if exc.errno == errno.ENOSPC:
+            return "Not enough disk space to finish this download. Free up space and try again."
+        if exc.errno == errno.EACCES:
+            return f"Permission denied writing to '{exc.filename or 'the destination folder'}'. Check folder permissions and try again."
+    if isinstance(exc, requests.RequestException):
+        return f"Network error: {exc}"
+    return str(exc)
 
 
 def _verify_sha256(path: str, expected: str) -> bool:

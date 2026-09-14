@@ -11,6 +11,7 @@ downloads — unlike the old tkinter wizard, where several download threads
 closed over one shared `for` loop's variables and clobbered each other.
 """
 
+import json
 import os
 import tempfile
 import threading
@@ -18,15 +19,16 @@ import time
 
 from flask import (
     Blueprint, current_app, flash, jsonify, redirect,
-    render_template, request, session, url_for,
+    render_template, request, send_file, session, url_for,
 )
 
-from core.auth import hash_password, verify_password
+from core.auth import generate_salt, hash_password, verify_password
 from core.downloader import (
-    CATALOGUE, LLM_CATALOGUE, MAPS_CATALOGUE, CatalogueError,
+    CATALOGUE, LLM_CATALOGUE, MAPS_CATALOGUE, STARTER_BUNDLE_KEYS, CatalogueError,
     llm_download_plan, resolve_catalogue_entry, search_catalogue,
 )
 from core.module_manager import MODULES_DIR
+from core.version import get_version
 from core import hotspot as hotspot_module
 
 bp = Blueprint("admin", __name__)
@@ -35,7 +37,7 @@ _ALWAYS_OPEN = {"admin.login", "admin.setup", "admin.setup_finish"}
 _SETUP_DOWNLOAD_ENDPOINTS = {
     "admin.download_quickstart", "admin.download_search",
     "admin.download_custom", "admin.download_llm", "admin.download_map",
-    "admin.download_status",
+    "admin.download_bundle", "admin.download_status",
 }
 
 _MAX_ATTEMPTS = 5
@@ -110,7 +112,8 @@ def login():
             return render_template("admin/login.html",
                                     error="Too many attempts. Try again in a few minutes.")
         password = request.form.get("password", "")
-        if verify_password(password, _cfg().get("admin_password_hash", "")):
+        cfg = _cfg()
+        if verify_password(password, cfg.get("admin_password_hash", ""), cfg.get("admin_password_salt", "")):
             _clear_lockout(ip)
             session["admin_authed"] = True
             session.permanent = True
@@ -154,10 +157,14 @@ def setup():
     except Exception:
         quickstart = {}
     installed_keys = {folder for folder, _ in _module_mgr().list_modules()}
+    bundle_remaining = [k for k in STARTER_BUNDLE_KEYS if k not in installed_keys]
     return render_template(
         "admin/setup.html", config=_cfg(), quickstart=quickstart,
         llm_catalogue=LLM_CATALOGUE, maps_catalogue=MAPS_CATALOGUE,
         installed_keys=installed_keys,
+        bundle_remaining=bundle_remaining,
+        bundle_total=len(STARTER_BUNDLE_KEYS),
+        bundle_size=sum(quickstart.get(k, {}).get("size", 0) or 0 for k in bundle_remaining),
     )
 
 
@@ -175,7 +182,8 @@ def setup_finish():
     if p1 != p2:
         flash("Passwords do not match.", "error")
         return redirect(url_for("admin.setup"))
-    cfg["admin_password_hash"] = hash_password(p1)
+    cfg["admin_password_salt"] = generate_salt()
+    cfg["admin_password_hash"] = hash_password(p1, cfg["admin_password_salt"])
 
     cfg["first_run"] = False
     _save_cfg(cfg)
@@ -201,10 +209,14 @@ def modules():
     except Exception:
         quickstart = {}
     installed_keys = {folder for folder, _ in module_mgr.list_modules()}
+    bundle_remaining = [k for k in STARTER_BUNDLE_KEYS if k not in installed_keys]
     return render_template(
         "admin/modules.html", installed=installed, quickstart=quickstart,
         llm_catalogue=LLM_CATALOGUE, maps_catalogue=MAPS_CATALOGUE,
         installed_keys=installed_keys,
+        bundle_remaining=bundle_remaining,
+        bundle_total=len(STARTER_BUNDLE_KEYS),
+        bundle_size=sum(quickstart.get(k, {}).get("size", 0) or 0 for k in bundle_remaining),
     )
 
 
@@ -278,6 +290,68 @@ def download_quickstart():
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id})
+
+
+@bp.route("/downloads/bundle", methods=["POST"])
+def download_bundle():
+    """
+    Installs STARTER_BUNDLE_KEYS as one action instead of making a new
+    admin evaluate all six Quick Start cards individually on day one.
+    Downloads/installs each not-already-installed item one at a time
+    (reusing Downloader.download() synchronously inside this background
+    thread, the same call a single-item download wraps in its own thread)
+    so one job tracks combined progress across the whole bundle.
+    """
+    keys = [k for k in STARTER_BUNDLE_KEYS if not _is_installed(k)]
+    if not keys:
+        return jsonify({"error": "Starter bundle is already installed."}), 409
+
+    resolved = []
+    for key in keys:
+        item = dict(CATALOGUE[key])
+        try:
+            live = resolve_catalogue_entry(item["opds_name"], item.get("opds_flavour"))
+        except CatalogueError as e:
+            return jsonify({"error": f"Could not resolve '{item['name']}': {e}"}), 502
+        item["url"] = live["url"]
+        resolved.append((key, item))
+
+    from core.downloader import DOWNLOAD_DIR
+
+    jobs = _jobs()
+    job_id = jobs.new_job()
+    module_mgr = _module_mgr()
+    downloader = _downloader()
+
+    def run():
+        total = len(resolved)
+        for i, (key, item) in enumerate(resolved):
+            dest = os.path.join(DOWNLOAD_DIR, f"{key}.zim")
+            outcome = {}
+
+            def progress_cb(pct, speed, i=i):
+                overall = (i + pct / 100) / total * 100
+                jobs.progress_cb(job_id)(overall, speed)
+
+            def done_cb(success, path, error=None):
+                outcome["success"] = success
+                outcome["error"] = error
+
+            downloader.download(item["url"], dest, progress_cb, done_cb)
+
+            if not outcome.get("success"):
+                jobs.done_cb(job_id)(False, "", outcome.get("error") or f"Failed to download '{item['name']}'.")
+                return
+            try:
+                module_mgr.install_from_download(key, item, dest)
+            except Exception as e:
+                jobs.done_cb(job_id)(False, "", str(e))
+                return
+
+        jobs.done_cb(job_id)(True, "")
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"job_id": job_id, "count": len(keys)})
 
 
 @bp.route("/downloads/search", methods=["POST"])
@@ -447,6 +521,13 @@ def services_unload():
     return redirect(url_for("admin.services"))
 
 
+# ── Help ──────────────────────────────────────────────────────────────────────
+
+@bp.route("/help")
+def help_page():
+    return render_template("admin/help.html")
+
+
 # ── Settings ──────────────────────────────────────────────────────────────────
 
 @bp.route("/settings", methods=["GET", "POST"])
@@ -472,13 +553,77 @@ def settings():
             if len(p1) < 6:
                 flash("Password must be at least 6 characters.", "error")
                 return redirect(url_for("admin.settings"))
-            cfg["admin_password_hash"] = hash_password(p1)
+            cfg["admin_password_salt"] = generate_salt()
+            cfg["admin_password_hash"] = hash_password(p1, cfg["admin_password_salt"])
 
         _save_cfg(cfg)
         flash("Settings saved.", "success")
         return redirect(url_for("admin.settings"))
 
     return render_template("admin/settings.html", config=cfg)
+
+
+@bp.route("/diagnostics/export")
+def diagnostics_export():
+    """Zips the log file(s), config.json (password hash/salt/secret_key
+    redacted - nothing else in it is sensitive), and the installed-module
+    list into one file a non-technical admin can email or hand to whoever's
+    helping them, without needing to find C:\\OfflineHub themselves."""
+    import io
+    import zipfile
+    from datetime import datetime
+
+    from core.logging_setup import LOG_DIR
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        if os.path.isdir(LOG_DIR):
+            for fname in os.listdir(LOG_DIR):
+                fpath = os.path.join(LOG_DIR, fname)
+                if os.path.isfile(fpath):
+                    zf.write(fpath, arcname=f"logs/{fname}")
+
+        cfg = dict(_cfg())
+        for secret_field in ("admin_password_hash", "admin_password_salt", "secret_key"):
+            if secret_field in cfg:
+                cfg[secret_field] = "[redacted]"
+        if isinstance(cfg.get("hotspot"), dict):
+            cfg["hotspot"] = dict(cfg["hotspot"])
+            cfg["hotspot"]["password"] = "[redacted]"
+        zf.writestr("config.json", json.dumps(cfg, indent=2))
+
+        module_mgr = _module_mgr()
+        registry = _registry()
+        modules_info = [
+            {
+                "folder": folder,
+                "name": data.get("name", folder),
+                "type": data.get("type"),
+                "status": registry.get_status(folder),
+            }
+            for folder, data in module_mgr.list_modules()
+        ]
+        zf.writestr("installed_modules.json", json.dumps(modules_info, indent=2))
+        zf.writestr("app_version.txt", get_version())
+
+    buf.seek(0)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return send_file(
+        buf, mimetype="application/zip", as_attachment=True,
+        download_name=f"offlinehub_diagnostics_{timestamp}.zip",
+    )
+
+
+# ── Update check ──────────────────────────────────────────────────────────────
+
+@bp.route("/updates/check")
+def updates_check():
+    from core.update_check import check_for_update
+
+    update = check_for_update(get_version())
+    if update:
+        return jsonify({"available": True, **update})
+    return jsonify({"available": False})
 
 
 def _register_autostart():

@@ -70,6 +70,21 @@ The first launch opens the setup wizard in your browser at
 anymore. A system tray icon (Open Portal / Open Admin / Quit) is the visible
 sign the app is running.
 
+### Running the Tests
+
+```powershell
+pip install -r requirements-dev.txt
+python -m pytest tests/ -v
+```
+
+Covers the highest-risk logic: password hashing, the content registry, the
+downloader (resumable downloads, checksum verification, mocked HTTP — no
+real network calls), and module install/remove, including a regression test
+for a real zip-slip vulnerability that was found and fixed in `install_from_zip`
+(a crafted ZIP could write files outside the modules folder — a real risk
+since Manual Install accepts uploads from any device on the hotspot). GitHub
+Actions (`.github/workflows/test.yml`) runs this suite on every push and PR.
+
 ---
 
 ## How Content Works

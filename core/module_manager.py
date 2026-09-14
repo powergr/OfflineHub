@@ -9,12 +9,15 @@ vendor binary of any kind involved.
 
 import glob
 import json
+import logging
 import os
 import shutil
 from shutil import copy2, rmtree
 
 from core.registry import ContentRegistry
 from core.zim_reader import ZimReader
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR    = r"C:\OfflineHub"
 MODULES_DIR = os.path.join(BASE_DIR, "modules")
@@ -42,7 +45,7 @@ class ModuleManager:
                         data = json.load(f)
                     results.append((folder, data))
                 except Exception as e:
-                    print(f"[WARNING] Skipping module '{folder}': invalid manifest.json ({e})")
+                    logger.warning("Skipping module '%s': invalid manifest.json (%s)", folder, e)
         return results
 
     def get_manifest(self, folder: str) -> dict | None:
@@ -106,7 +109,7 @@ class ModuleManager:
 
         with tempfile.TemporaryDirectory() as temp_dir:
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                zip_ref.extractall(temp_dir)
+                _safe_extract(zip_ref, temp_dir)
 
             manifest_dir = None
             for root, _dirs, files in os.walk(temp_dir):
@@ -290,6 +293,25 @@ class ModuleManager:
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────
+
+def _safe_extract(zip_ref, dest_dir: str):
+    """
+    zipfile.ZipFile.extractall() does not guard against "zip slip": a member
+    named e.g. "../../Windows/System32/evil.dll" or an absolute path extracts
+    outside dest_dir (os.path.join silently discards the first argument when
+    the second is absolute, which is exactly how an absolute-path member
+    escapes too). Manual Install explicitly accepts ZIPs uploaded from any
+    device on the hotspot, so a crafted "content pack" is a real path here,
+    not a theoretical one - reject any member that resolves outside dest_dir
+    before extracting anything.
+    """
+    dest_root = os.path.realpath(dest_dir)
+    for member in zip_ref.namelist():
+        target = os.path.realpath(os.path.join(dest_dir, member))
+        if target != dest_root and not target.startswith(dest_root + os.sep):
+            raise ValueError(f"Refusing to extract '{member}': escapes the destination folder.")
+    zip_ref.extractall(dest_dir)
+
 
 def _safe_name(raw: str) -> str:
     return "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in raw).strip()

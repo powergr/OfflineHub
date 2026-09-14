@@ -7,12 +7,16 @@ the visible running/quit signal, since there's no window anymore.
 """
 
 import json
+import logging
 import os
 import sys
 import threading
 import webbrowser
 
+from core.logging_setup import setup_logging
 from core.version import get_version
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR    = r"C:\OfflineHub"
 MODULES_DIR = os.path.join(BASE_DIR, "modules")
@@ -25,6 +29,7 @@ DEFAULT_CONFIG = {
     "first_run": True,
     "version": get_version(),
     "admin_password_hash": "",
+    "admin_password_salt": "",
     "secret_key": "",
     "hotspot": {
         "ssid": "OfflineHub",
@@ -75,15 +80,16 @@ def _build_tray(config: dict, server, hotspot_mgr, registry):
         webbrowser.open(base_url + "/admin")
 
     def quit_app(icon, item):
+        logger.info("Quit requested from tray icon")
         icon.stop()
         try:
             registry.unload_all()
         except Exception:
-            pass
+            logger.exception("Error unloading modules on quit")
         try:
             hotspot_mgr.stop()
         except Exception:
-            pass
+            logger.exception("Error stopping hotspot on quit")
         server.shutdown()
 
     menu = pystray.Menu(
@@ -95,6 +101,22 @@ def _build_tray(config: dict, server, hotspot_mgr, registry):
 
 
 def main():
+    setup_logging()
+
+    from core.single_instance import acquire
+
+    if not acquire():
+        logger.warning(
+            "Another OfflineHub instance is already running - opening it "
+            "instead of starting a second one."
+        )
+        config = load_config()
+        port = config.get("portal_port", 8000)
+        webbrowser.open(f"http://127.0.0.1:{port}/")
+        return
+
+    logger.info("OfflineHub %s starting", get_version())
+
     from werkzeug.serving import make_server
 
     from core.app_factory import create_app

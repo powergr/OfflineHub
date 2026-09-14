@@ -37,9 +37,8 @@ class JobTracker:
         return cb
 
     def done_cb(self, job_id: str, on_success: Callable[[str], None] | None = None
-                ) -> Callable[[bool, str], None]:
-        def cb(success: bool, path: str):
-            error = None
+                ) -> Callable[[bool, str, str | None], None]:
+        def cb(success: bool, path: str, error: str | None = None):
             if success and on_success:
                 try:
                     on_success(path)

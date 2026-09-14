@@ -37,6 +37,14 @@
         small offline LLM assistant, served over your local Wi-Fi with no
         internet required.
       </p>
+      <a href="{{ url_for('admin.diagnostics_export') }}" class="btn secondary" style="margin-top: 16px; display: inline-block; width: auto; text-decoration: none;">
+        📋 Export Diagnostics
+      </a>
+      <p class="muted" style="margin-top: 8px; font-size: 12px;">
+        Downloads a zip with the log file, settings (passwords excluded),
+        and installed-module list — handy to email whoever's helping you
+        troubleshoot.
+      </p>
     </div>
   </div>
 

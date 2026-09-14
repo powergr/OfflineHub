@@ -1,5 +1,21 @@
 <section class="tab-panel" data-tab="quickstart">
 <div class="section-title" style="margin-top:0">📦 Quick Start</div>
+{% if bundle_remaining %}
+<div class="card dl-card bundle-card" id="bundle-card">
+  <div class="dl-card-head">
+    <span class="dl-emoji">🚀</span>
+    <span class="dl-name">Install Recommended Starter Bundle</span>
+  </div>
+  <p class="dl-desc">
+    {% for k in bundle_remaining %}{{ (quickstart.get(k, {}).name or k) }}{{ ", " if not loop.last }}{% endfor %}
+    — a well-rounded default instead of picking through six cards individually.
+    {% if bundle_remaining | length < bundle_total %}(the rest of the bundle is already installed){% endif %}
+  </p>
+  <div class="dl-meta">{% if bundle_size %}{{ (bundle_size / 1073741824) | round(2) }} GB total{% else %}size unknown{% endif %}</div>
+  <div class="progress" id="bundle-progress" style="display:none"><div></div></div>
+  <button class="btn" onclick="startBundle()" id="bundle-btn">Install Starter Bundle</button>
+</div>
+{% endif %}
 <div class="grid" id="quickstart-list">
   {% for key, item in quickstart.items() %}
   <div class="card dl-card" id="qs-row-{{ key }}">
@@ -89,6 +105,7 @@
   .dl-desc { color: var(--muted); font-size: 12.5px; line-height: 1.5; flex: 1; min-height: 34px; }
   .dl-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
   .dl-card > .btn, .dl-card > button { margin-top: 14px; width: 100%; }
+  .bundle-card { border-color: var(--accent2); margin-bottom: 18px; }
 </style>
 
 <script>
@@ -101,6 +118,32 @@
       setTimeout(poll, 1000);
     };
     poll();
+  }
+
+  function startBundle() {
+    const btn = document.getElementById("bundle-btn");
+    const bar = document.getElementById("bundle-progress");
+    btn.disabled = true;
+    bar.style.display = "block";
+
+    fetch("/admin/downloads/bundle", { method: "POST" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) { btn.disabled = false; alert(data.error); return; }
+        pollJob(
+          data.job_id,
+          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
+          (job) => {
+            if (job.success) {
+              btn.textContent = "✓ Installed";
+              location.reload();  // refreshes card states across the whole panel
+            } else {
+              btn.disabled = false;
+              alert(job.error || "Starter bundle install failed.");
+            }
+          }
+        );
+      });
   }
 
   function startQuickstart(key) {

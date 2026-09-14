@@ -52,6 +52,13 @@
       const form = document.getElementById("form");
       const promptEl = document.getElementById("prompt");
       const sendBtn = document.getElementById("send");
+      // Prior turns in this conversation - sent back with every request so
+      // the model actually has memory of earlier messages. Without this,
+      // every single message started a brand new conversation from
+      // scratch (confirmed by reading the old code: it never sent or used
+      // any history at all), so a follow-up like "can you simplify that?"
+      // had no "that" to refer to.
+      const history = [];
 
       function addMessage(role, text) {
         const div = document.createElement("div");
@@ -72,12 +79,13 @@
         sendBtn.disabled = true;
         addMessage("user", prompt);
         const replyEl = addMessage("assistant", "");
+        let hadError = false;
 
         try {
           const resp = await fetch(`/api/chat/${encodeURIComponent(moduleId)}/stream`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ prompt }),
+            body: JSON.stringify({ prompt, history }),
           });
           const reader = resp.body.getReader();
           const decoder = new TextDecoder();
@@ -105,6 +113,7 @@
                 if (text.startsWith(" ")) text = text.slice(1);
                 text = text.replace(/\\n/g, "\n");
                 if (text.startsWith("[error]")) {
+                  hadError = true;
                   replyEl.textContent += "\n" + text;
                 } else {
                   replyEl.textContent += text;
@@ -114,8 +123,16 @@
             }
           }
         } catch (e) {
+          hadError = true;
           replyEl.textContent += "\n[connection error]";
         } finally {
+          // Only remembered on success - an error message isn't something
+          // the model actually said, and feeding it back in as if it were
+          // a real reply would corrupt every later turn in this chat.
+          if (!hadError) {
+            history.push({ role: "user", content: prompt });
+            history.push({ role: "assistant", content: replyEl.textContent });
+          }
           sendBtn.disabled = false;
         }
       }

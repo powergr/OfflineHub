@@ -152,9 +152,24 @@ def chat_stream(module_id):
     if manifest is None or manifest.get("type") != "llm":
         abort(404)
 
-    prompt = (request.get_json(silent=True) or {}).get("prompt", "").strip()
+    body = request.get_json(silent=True) or {}
+    prompt = (body.get("prompt") or "").strip()
     if not prompt:
         abort(400)
+
+    # The browser sends back everything said so far in this chat so the
+    # model actually has conversation memory (see core/llm_engine.py) -
+    # sanitized here rather than trusted as-is, since it's still
+    # client-supplied JSON reaching the model prompt.
+    history = []
+    for turn in (body.get("history") or []):
+        if (
+            isinstance(turn, dict)
+            and turn.get("role") in ("user", "assistant")
+            and isinstance(turn.get("content"), str)
+            and turn["content"].strip()
+        ):
+            history.append({"role": turn["role"], "content": turn["content"]})
 
     try:
         engine = _module_mgr().get_llm_engine(module_id)
@@ -163,7 +178,7 @@ def chat_stream(module_id):
 
     def event_stream():
         try:
-            for chunk in engine.generate_stream(prompt):
+            for chunk in engine.generate_stream(prompt, history=history):
                 escaped = chunk.replace("\n", "\\n")
                 yield f"data: {escaped}\n\n"
         except Exception as e:
