@@ -161,6 +161,31 @@ class ModuleManager:
 
         self.open_module(key, manifest)
 
+    def install_map_from_download(self, key: str, item: dict, downloaded_path: str):
+        """A single-file catalogue download (mbtiles map) finished - install it as a module."""
+        mod_dir = os.path.join(MODULES_DIR, key)
+        if os.path.exists(mod_dir):
+            raise FileExistsError(
+                f"'{key}' is already installed. Remove it first if you want to replace it."
+            )
+        os.makedirs(os.path.join(mod_dir, "content"), exist_ok=True)
+
+        dest_file = os.path.join(mod_dir, "content", os.path.basename(downloaded_path))
+        if downloaded_path != dest_file:
+            copy2(downloaded_path, dest_file)
+
+        manifest = {
+            "name":        item["name"],
+            "emoji":       item["emoji"],
+            "type":        "mbtiles",
+            "format":      "vector",
+            "description": item.get("description", ""),
+        }
+        with open(os.path.join(mod_dir, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+
+        self.open_module(key, manifest)
+
     def install_llm_from_download(self, key: str, item: dict, downloaded_dir: str):
         """A multi-file LLM model download finished — install it as an llm module."""
         mod_dir = os.path.join(MODULES_DIR, key)

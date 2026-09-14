@@ -36,10 +36,11 @@ def index():
 def api_modules():
     module_mgr = _module_mgr()
     registry = _registry()
+    tile_server = _tile_server()
     result = {}
     for folder, data in module_mgr.list_modules():
         status = registry.get_status(folder)
-        result[folder] = {
+        entry = {
             "name":        data.get("name", folder),
             "emoji":       data.get("emoji", "📖"),
             "description": data.get("description", ""),
@@ -47,6 +48,19 @@ def api_modules():
             "status":      "error" if status == "error" else "ready",
             "format":      data.get("format", "raster"),
         }
+        # Lets the frontend fitBounds() to wherever this map actually covers,
+        # instead of guessing a center from the module name - added after
+        # confirming any non-Cyprus/London map rendered as a blank background
+        # (the default [10, 50] view sits outside most curated extracts).
+        if entry["type"] == "mbtiles":
+            bounds_str = tile_server.metadata(folder).get("bounds", "")
+            parts = bounds_str.split(",")
+            if len(parts) == 4:
+                try:
+                    entry["bounds"] = [float(p) for p in parts]
+                except ValueError:
+                    pass
+        result[folder] = entry
     return jsonify(result)
 
 

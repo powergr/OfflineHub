@@ -23,7 +23,7 @@ from flask import (
 
 from core.auth import hash_password, verify_password
 from core.downloader import (
-    CATALOGUE, LLM_CATALOGUE, CatalogueError,
+    CATALOGUE, LLM_CATALOGUE, MAPS_CATALOGUE, CatalogueError,
     llm_download_plan, resolve_catalogue_entry, search_catalogue,
 )
 from core.module_manager import MODULES_DIR
@@ -34,7 +34,8 @@ bp = Blueprint("admin", __name__)
 _ALWAYS_OPEN = {"admin.login", "admin.setup", "admin.setup_finish"}
 _SETUP_DOWNLOAD_ENDPOINTS = {
     "admin.download_quickstart", "admin.download_search",
-    "admin.download_custom", "admin.download_llm", "admin.download_status",
+    "admin.download_custom", "admin.download_llm", "admin.download_map",
+    "admin.download_status",
 }
 
 _MAX_ATTEMPTS = 5
@@ -155,7 +156,8 @@ def setup():
     installed_keys = {folder for folder, _ in _module_mgr().list_modules()}
     return render_template(
         "admin/setup.html", config=_cfg(), quickstart=quickstart,
-        llm_catalogue=LLM_CATALOGUE, installed_keys=installed_keys,
+        llm_catalogue=LLM_CATALOGUE, maps_catalogue=MAPS_CATALOGUE,
+        installed_keys=installed_keys,
     )
 
 
@@ -201,7 +203,8 @@ def modules():
     installed_keys = {folder for folder, _ in module_mgr.list_modules()}
     return render_template(
         "admin/modules.html", installed=installed, quickstart=quickstart,
-        llm_catalogue=LLM_CATALOGUE, installed_keys=installed_keys,
+        llm_catalogue=LLM_CATALOGUE, maps_catalogue=MAPS_CATALOGUE,
+        installed_keys=installed_keys,
     )
 
 
@@ -342,6 +345,33 @@ def download_llm():
     threading.Thread(
         target=_downloader().download_set,
         args=(files, dest_dir, jobs.progress_cb(job_id), jobs.done_cb(job_id, on_success)),
+        daemon=True,
+    ).start()
+    return jsonify({"job_id": job_id})
+
+
+@bp.route("/downloads/map", methods=["POST"])
+def download_map():
+    key = request.form.get("key") or (request.get_json(silent=True) or {}).get("key")
+    if key not in MAPS_CATALOGUE:
+        return jsonify({"error": "Unknown map catalogue key."}), 404
+    if _is_installed(key):
+        return jsonify({"error": f"'{key}' is already installed."}), 409
+
+    item = dict(MAPS_CATALOGUE[key])
+    from core.downloader import DOWNLOAD_DIR
+    dest = os.path.join(DOWNLOAD_DIR, f"{key}.mbtiles")
+
+    jobs = _jobs()
+    job_id = jobs.new_job()
+    module_mgr = _module_mgr()
+
+    def on_success(path):
+        module_mgr.install_map_from_download(key, item, path)
+
+    threading.Thread(
+        target=_downloader().download,
+        args=(item["url"], dest, jobs.progress_cb(job_id), jobs.done_cb(job_id, on_success)),
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id})

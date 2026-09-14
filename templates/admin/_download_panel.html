@@ -42,6 +42,27 @@
   {% endfor %}
 </div>
 
+<div class="section-title">🗺️ Offline Maps</div>
+<p class="muted" style="margin-bottom: 14px;">Curated vector maps - roads and towns down to city level, no internet needed to browse them.</p>
+<div class="grid" id="maps-list">
+  {% for key, item in (maps_catalogue | default({})).items() %}
+  <div class="card dl-card" id="map-row-{{ key }}">
+    <div class="dl-card-head">
+      <span class="dl-emoji">{{ item.emoji }}</span>
+      <span class="dl-name">{{ item.name }}</span>
+    </div>
+    <p class="dl-desc">{{ item.description }}</p>
+    <div class="dl-meta">{{ (item.size / 1073741824) | round(2) }} GB</div>
+    <div class="progress" id="map-progress-{{ key }}" style="display:none"><div></div></div>
+    {% if key in (installed_keys | default([])) %}
+      <button class="btn secondary" disabled>✓ Installed</button>
+    {% else %}
+      <button class="btn" onclick="startMap('{{ key }}')" id="map-btn-{{ key }}">Download</button>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
 <div class="section-title">🔎 Discover More Content</div>
 <div class="card">
   <p class="muted" style="margin-bottom: 12px;">Search the live Kiwix library for anything else (subjects, languages, other wikis).</p>
@@ -106,6 +127,31 @@
     bar.style.display = "block";
 
     fetch("/admin/downloads/llm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) { btn.disabled = false; btn.textContent = "Retry"; alert(data.error); return; }
+        pollJob(
+          data.job_id,
+          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
+          (job) => {
+            if (job.success) { btn.textContent = "✓ Installed"; }
+            else { btn.disabled = false; btn.textContent = "Retry"; alert(job.error || "Download failed."); }
+          }
+        );
+      });
+  }
+
+  function startMap(key) {
+    const btn = document.getElementById(`map-btn-${key}`);
+    const bar = document.getElementById(`map-progress-${key}`);
+    btn.disabled = true;
+    bar.style.display = "block";
+
+    fetch("/admin/downloads/map", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key }),

@@ -184,6 +184,61 @@ LLM_CATALOGUE: dict[str, dict] = {
     },
 }
 
+# ── Offline maps (curated .mbtiles downloads) ────────────────────────────────
+# Built from Protomaps' free daily OpenStreetMap basemap build via
+# tools/build_map_packs.py (see that file for why there's no "whole
+# continent" option: a real continent at useful zoom is tens of GB, and no
+# free no-account service hosts ready continent-sized files the way Kiwix
+# does for ZIM content). Hosted on Google Drive rather than resolved live
+# like CATALOGUE, since there's no equivalent OPDS-style catalog for these -
+# the URLs below already carry Drive's "confirm=t" large-file bypass,
+# confirmed against every one of these six files (Range/resume, exact
+# Content-Length, no virus-scan interstitial) before being pasted in here.
+MAPS_CATALOGUE: dict[str, dict] = {
+    "map_world_overview": {
+        "name":        "Map: World (overview)",
+        "emoji":       "🗺️",
+        "description": "Low-detail whole-world map - country outlines and major borders, no street detail.",
+        "size":        47_063_040,
+        "url":         "https://drive.usercontent.google.com/download?id=175XC8PxwGaiP8OkIbh2y9raEBA9JOASY&export=download&confirm=t",
+    },
+    "map_uk": {
+        "name":        "Map: United Kingdom",
+        "emoji":       "🗺️",
+        "description": "Offline vector map of the United Kingdom, roads and cities down to town level.",
+        "size":        360_099_840,
+        "url":         "https://drive.usercontent.google.com/download?id=1nhNDE4MUqbOeVz2rIpw830O1xwkbkq6r&export=download&confirm=t",
+    },
+    "map_japan": {
+        "name":        "Map: Japan",
+        "emoji":       "🗺️",
+        "description": "Offline vector map of Japan's main islands, roads and cities down to town level.",
+        "size":        439_545_856,
+        "url":         "https://drive.usercontent.google.com/download?id=19-a61dQ0OGf6s3nxuHfrIvooF1T-0rH9&export=download&confirm=t",
+    },
+    "map_germany": {
+        "name":        "Map: Germany",
+        "emoji":       "🗺️",
+        "description": "Offline vector map of Germany, roads and cities down to town level.",
+        "size":        886_685_696,
+        "url":         "https://drive.usercontent.google.com/download?id=1hhydSvmw80FjtXaWU8LOEQFxaQo9V-A7&export=download&confirm=t",
+    },
+    "map_france": {
+        "name":        "Map: France",
+        "emoji":       "🗺️",
+        "description": "Offline vector map of metropolitan France, roads and cities down to town level.",
+        "size":        1_132_564_480,
+        "url":         "https://drive.usercontent.google.com/download?id=1hMM5f4bU-YflgBzzd1T0w-rGNkV56C1W&export=download&confirm=t",
+    },
+    "map_usa": {
+        "name":        "Map: United States (contiguous)",
+        "emoji":       "🗺️",
+        "description": "Offline vector map of the contiguous United States, roads and cities down to town level.",
+        "size":        2_044_141_568,
+        "url":         "https://drive.usercontent.google.com/download?id=116LMKyRfj1Ms2LJFfHfLMhWi-nF53OIy&export=download&confirm=t",
+    },
+}
+
 
 class CatalogueError(Exception):
     pass
