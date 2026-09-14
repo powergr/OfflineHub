@@ -165,10 +165,20 @@ my_module/
 ## The Offline LLM
 
 Go to **Admin → Modules → Offline Assistant** and click Download — this
-pulls a small pre-tested model (Qwen2.5 0.5B Instruct, ~0.8GB, verified
-working end-to-end including in the compiled build) straight from Hugging
-Face and installs it as a `type: "llm"` module. Chat with it from the
-student portal at `/chat/<module-id>`.
+pulls a pre-tested model straight from Hugging Face and installs it as a
+`type: "llm"` module. **Phi-4-mini** (~4.9GB, Microsoft, MIT license) is the
+recommended default — the smaller Qwen2.5 0.5B option that used to be here
+was removed: its answers were too weak to be useful in practice. Chat with
+the installed model from the student portal at `/chat/<module-id>`.
+
+A standalone zip of just the Phi-4-mini model is also available, for testing
+or a first install without a 4.9GB admin-panel download:
+
+**[Download OfflineHub_LLM_Phi4Mini.zip (~4.6GB)](https://drive.google.com/file/d/1fcf9yW2tl9JQcDXmwDusx8t0jk6uMrdD/view?usp=sharing)**
+
+Unzip it directly into `C:\OfflineHub\` (same drop-in pattern as the
+companion pack above) — the app picks it up as the `assistant_phi4_mini`
+module automatically on next launch. Built with `tools/build_llm_pack.py`.
 
 Any other small instruction-tuned model exported for `onnxruntime-genai`
 works too — e.g. a Phi-3.5-mini ONNX build. Download all of that variant's

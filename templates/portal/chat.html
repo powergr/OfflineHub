@@ -91,13 +91,17 @@
             const lines = buffer.split("\n\n");
             buffer = lines.pop();
             for (const chunk of lines) {
-              const line = chunk.trim();
-              if (line.startsWith("data:")) {
-                // SSE framing puts exactly one space after "data:" — strip only
-                // that one, not a full trim(), or real leading/trailing spaces
-                // inside streamed tokens (e.g. " the", " is") get eaten too,
-                // gluing every word in the reply together.
-                let text = line.slice(5);
+              // No .trim() here on purpose, and confirmed why by reproducing
+              // the actual bug this caused: a token that's nothing but a
+              // space (common between words/numbers - e.g. "The number", " ",
+              // "0", ".11") makes the full SSE line "data:  " all-whitespace
+              // after "data:", so trimming the whole line erased the token
+              // entirely instead of just the one separator space after
+              // "data:" - gluing words together ("number0.11"). The server
+              // always sends well-formed "data: <content>" lines with no
+              // stray leading whitespace, so trimming was never needed here.
+              if (chunk.startsWith("data:")) {
+                let text = chunk.slice(5);
                 if (text.startsWith(" ")) text = text.slice(1);
                 text = text.replace(/\\n/g, "\n");
                 if (text.startsWith("[error]")) {

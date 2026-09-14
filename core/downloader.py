@@ -115,29 +115,16 @@ _FALLBACK_URLS = {
 # subfolder layouts. File lists and sizes below were checked live against
 # each repo's file tree this session — Hugging Face repos do get reorganized
 # over time, so if one ever starts 404ing, check that repo's current file
-# tree before assuming the code is at fault. All four are ungated/MIT or
+# tree before assuming the code is at fault. All three are ungated/MIT or
 # Apache-licensed public repos (no HF login/token needed to download).
 #
 # Sizes are ordered smallest-to-largest so the download panel (which lists
 # LLM_CATALOGUE in dict order) shows the easy option first and the heaviest
 # last; "assistant_phi4_mini" is flagged recommended as the best quality/size
-# tradeoff for a typical PC (~5GB disk, 8GB+ RAM).
+# tradeoff for a typical PC (~5GB disk, 8GB+ RAM). The Qwen2.5 0.5B option
+# was removed - answers were too weak to be useful in practice.
 
 LLM_CATALOGUE: dict[str, dict] = {
-    "assistant_qwen_0_5b": {
-        "name":        "Offline Assistant — Qwen2.5 0.5B (fastest, smallest)",
-        "emoji":       "🐣",
-        "description": "Tiny and very fast, but answers are noticeably weaker. Good for "
-                        "old/low-RAM PCs or a quick first test — not recommended otherwise.",
-        "size":        873_540_870,
-        "repo":        "xiaoyao9184/Qwen2.5-0.5B-Instruct-onnx-genai",
-        "subfolder":   "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4",
-        "files": [
-            "genai_config.json", "tokenizer.json", "tokenizer_config.json",
-            "special_tokens_map.json", "added_tokens.json", "chat_template.jinja",
-            "model.onnx", "model.onnx.data",
-        ],
-    },
     "assistant_phi3_mini": {
         "name":        "Offline Assistant — Phi-3-mini 3.8B (~2.7 GB)",
         "emoji":       "🤖",
