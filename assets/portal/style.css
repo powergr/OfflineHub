@@ -1,0 +1,105 @@
+/* Shared design system — used by both the admin UI and the student portal,
+   so the whole app reads as one product instead of two different skins. */
+
+:root {
+  --bg: #0b0e14;
+  --surface: #121722;
+  --surface2: #1a212f;
+  --surface3: #222b3d;
+  --border: #2a3344;
+  --accent: #22c55e;
+  --accent-dim: #16532f;
+  --accent2: #3b82f6;
+  --accent2-hover: #60a5fa;
+  --danger: #f87171;
+  --danger-dim: #3a1a1a;
+  --warning: #f59e0b;
+  --text: #e8ecf3;
+  --muted: #8b96a8;
+  --radius-sm: 8px;
+  --radius: 14px;
+  --radius-lg: 20px;
+  --shadow: 0 10px 34px rgba(0, 0, 0, 0.38);
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --page-w: 1360px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent2-hover); }
+h1, h2, h3 { margin: 0; }
+p { margin: 0; }
+
+.muted { color: var(--muted); font-size: 13px; }
+
+/* ── Cards & grids ─────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.grid.grid-narrow { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+.btn, button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 18px; border-radius: var(--radius-sm); border: none;
+  background: var(--accent2); color: #fff; font-weight: 600; font-size: 14px;
+  cursor: pointer; text-decoration: none; font-family: inherit;
+  transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+.btn:hover, button:hover { background: var(--accent2-hover); }
+.btn:active, button:active { transform: scale(0.97); }
+.btn.secondary, button.secondary { background: var(--surface3); border: 1px solid var(--border); color: var(--text); }
+.btn.secondary:hover, button.secondary:hover { background: var(--surface2); }
+.btn.danger, button.danger { background: var(--danger-dim); color: var(--danger); border: 1px solid #f8717133; }
+.btn.danger:hover, button.danger:hover { background: #4a1f1f; }
+.btn:disabled, button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+/* ── Badges / status ───────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 999px; font-weight: 700;
+}
+.badge-ready, .badge-success { background: var(--accent-dim); color: #4ade80; border: 1px solid #22c55e33; }
+.badge-error { background: var(--danger-dim); color: var(--danger); border: 1px solid #f8717133; }
+.badge-idle { background: var(--surface3); color: var(--muted); border: 1px solid var(--border); }
+
+.version-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--surface3); border: 1px solid var(--border); color: var(--muted);
+  text-decoration: none;
+}
+
+/* ── Forms ─────────────────────────────────────────────────────────────── */
+label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; margin-top: 14px; }
+input[type=text], input[type=password], input[type=number], textarea, select {
+  width: 100%; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text); font-size: 14px; font-family: inherit;
+}
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent2); }
+
+/* ── Progress bars ─────────────────────────────────────────────────────── */
+.progress { height: 8px; border-radius: 4px; background: var(--surface3); overflow: hidden; margin-top: 10px; }
+.progress > div { height: 100%; background: var(--accent2); width: 0%; transition: width 0.2s ease; }
+
+/* ── Flash messages ────────────────────────────────────────────────────── */
+.flashes { margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px; }
+.flash { padding: 10px 14px; border-radius: var(--radius-sm); font-size: 14px; }
+.flash-success { background: var(--accent-dim); color: #4ade80; border: 1px solid #22c55e33; }
+.flash-error { background: var(--danger-dim); color: var(--danger); border: 1px solid #f8717133; }

@@ -17,3 +17,6 @@ __pycache__/
 Output/
 main.build/
 main.dist/
+
+# companion pack output (multi-GB, distributed via Dropbox, not git)
+*.zip

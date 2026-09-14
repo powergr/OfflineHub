@@ -16,6 +16,65 @@ import socket
 import subprocess
 from typing import Tuple
 
+# All console-app subprocesses (powershell.exe, netsh.exe, arp.exe) must be
+# started with CREATE_NO_WINDOW — otherwise, since this app itself runs
+# windowless (no console of its own), Windows pops up a brand-new visible
+# console window for every single one of them. Confirmed live: without this,
+# a single "Start Hotspot" click that falls through WinRT -> netsh can pop
+# five or more PowerShell/cmd windows.
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+
+# Windows Mobile Hotspot / ICS has used this subnet by long-standing default
+# for years, regardless of whether it was started via the WinRT API or the
+# legacy netsh hosted network — confirmed live on this machine (192.168.137.1).
+_HOTSPOT_SUBNET_PREFIX = "192.168.137."
+
+# Loads the WinRT tethering types and the reflection-based Await helpers
+# PowerShell needs to call their async (IAsyncAction / IAsyncOperation<T>)
+# methods. Verified live against this exact machine's PowerShell 5.1 — the
+# previous version of this script referenced the WindowsRuntimeSystemExtensions
+# type under the wrong namespace (System.Runtime.InteropServices.WindowsRuntime
+# instead of just System), never loaded the System.Runtime.WindowsRuntime
+# assembly that type actually lives in, and never explicitly loaded the
+# Windows.Networking.Connectivity / Windows.Networking.NetworkOperators WinRT
+# namespaces — each WinRT namespace needs its own explicit
+# "[Type,Namespace,ContentType=WindowsRuntime]" load before its types are
+# usable, loading one unrelated namespace (as the old script did) does not
+# make others available. All three mistakes made every WinRT call fail
+# silently, so the app always fell through to the legacy netsh path — which
+# many modern Wi-Fi drivers (this machine's Realtek RTL8852BE included, per
+# `netsh wlan show drivers` -> "Hosted network supported: No") have dropped
+# support for entirely, hence the "group or resource is not in the correct
+# state" error. Fixing this so WinRT actually works removes the need to fall
+# back to netsh at all on hardware like this.
+_WINRT_PRELUDE = """
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+[void][Windows.Networking.Connectivity.NetworkInformation,Windows.Networking.Connectivity,ContentType=WindowsRuntime]
+[void][Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager,Windows.Networking.NetworkOperators,ContentType=WindowsRuntime]
+
+$__asTaskAction = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and -not $_.IsGenericMethod -and $_.GetParameters().Count -eq 1
+})[0]
+$__asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+})[0]
+
+function Await-Action($winrtAction) {
+    $task = $__asTaskAction.Invoke($null, @($winrtAction))
+    $task.Wait(-1) | Out-Null
+}
+function Await-Operation($winrtOperation, $resultType) {
+    $task = $__asTaskGeneric.MakeGenericMethod($resultType).Invoke($null, @($winrtOperation))
+    $task.Wait(-1) | Out-Null
+    return $task.Result
+}
+
+function Get-InternetProfile {
+    $profiles = [Windows.Networking.Connectivity.NetworkInformation]::GetConnectionProfiles()
+    return $profiles | Where-Object { $_.GetNetworkConnectivityLevel() -gt 0 } | Select-Object -First 1
+}
+"""
+
 
 def is_admin() -> bool:
     """Return True if the current process has administrator privileges."""
@@ -65,12 +124,16 @@ class HotspotManager:
         ssid = self.config["hotspot"].get("ssid", "SchoolHub")
         pw   = self.config["hotspot"].get("password", "schoolhub2024")
 
-        ok, msg = self._try_winrt(ssid, pw)
-        if not ok:
-            ok, msg = self._try_netsh(ssid, pw)
+        ok, winrt_msg = self._try_winrt(ssid, pw)
+        if ok:
+            self._running = True
+            return True, winrt_msg
 
+        ok, netsh_msg = self._try_netsh(ssid, pw)
         self._running = ok
-        return ok, msg
+        if ok:
+            return True, netsh_msg
+        return False, f"Mobile Hotspot: {winrt_msg}\n\nLegacy hosted network: {netsh_msg}"
 
     def stop(self):
         self._stop_winrt()
@@ -81,7 +144,29 @@ class HotspotManager:
         return self._running
 
     def get_local_ip(self) -> str:
-        """Return the best non-loopback IPv4 address for this machine."""
+        """
+        Return the IP address students should actually connect to.
+
+        On a machine with both an internet uplink (Ethernet/Wi-Fi station)
+        and an active hotspot, those are two different adapters on two
+        different subnets — confirmed live: Ethernet at 172.20.147.29,
+        hotspot AP at 192.168.137.1. The naive "connect a UDP socket to
+        8.8.8.8 and read the source address" trick always returns whichever
+        adapter has the default route (the internet uplink), which is
+        exactly the one address a phone connected to the hotspot cannot
+        reach. Prefer the hotspot's own subnet (same 192.168.137.0/24
+        convention _HOTSPOT_SUBNET_PREFIX already assumes in
+        list_connected_devices below) when it's present.
+        """
+        try:
+            addrs = socket.gethostbyname_ex(socket.gethostname())[2]
+        except Exception:
+            addrs = []
+
+        for addr in addrs:
+            if addr.startswith(_HOTSPOT_SUBNET_PREFIX):
+                return addr
+
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
@@ -91,21 +176,33 @@ class HotspotManager:
 
     def list_connected_devices(self) -> list[str]:
         """
-        Parse the ARP cache to find devices likely on the hotspot subnet.
+        Parse the ARP cache to find devices on the hotspot subnet.
         Returns a list of IP / MAC strings.
         """
         try:
-            out = subprocess.check_output(["arp", "-a"],
-                                          encoding="utf-8", errors="ignore")
+            out = subprocess.check_output(
+                ["arp", "-a"], encoding="utf-8", errors="ignore",
+                creationflags=_NO_WINDOW,
+            )
             lines   = out.splitlines()
             devices = []
+            # Confirmed live: Windows Mobile Hotspot clients show up as
+            # "static" in arp -a, not "dynamic" (matching the old regex here
+            # meant this always returned empty, even with a phone connected).
+            # Match either type, but skip the gateway itself (.1) and the
+            # broadcast entry (ff-ff-ff-ff-ff-ff / .255).
+            pattern = re.compile(
+                r"(" + re.escape(_HOTSPOT_SUBNET_PREFIX) + r"\d+)\s+([\w-]+)\s+(?:dynamic|static)"
+            )
             for line in lines:
-                # arp -a format: "  192.168.137.x    xx-xx-…    dynamic"
-                match = re.search(
-                    r"(192\.168\.137\.\d+)\s+([\w-]+)\s+dynamic", line
-                )
-                if match:
-                    devices.append(f"{match.group(1)}  ({match.group(2)})")
+                # arp -a format: "  192.168.137.x    xx-xx-…    dynamic|static"
+                match = pattern.search(line)
+                if not match:
+                    continue
+                ip, mac = match.group(1), match.group(2)
+                if mac.lower() == "ff-ff-ff-ff-ff-ff" or ip.endswith(".1"):
+                    continue
+                devices.append(f"{ip}  ({mac})")
             return devices
         except Exception:
             return []
@@ -118,37 +215,27 @@ class HotspotManager:
         PowerShell. This is more reliable than the raw WinRT COM approach
         in an elevated process.
         """
-        ps_script = f"""
-$ErrorActionPreference = 'Stop'
+        ps_script = _WINRT_PRELUDE + f"""
 try {{
-    # Load WinRT types
-    [void][Windows.System.UserProfile.LockScreen,Windows.System.UserProfile,ContentType=WindowsRuntime]
-    $asm = [System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeSystemExtensions]
-
-    $tetheringMgr = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager]
-    $profiles = [Windows.Networking.Connectivity.NetworkInformation]::GetConnectionProfiles()
-    $internet = $profiles | Where-Object {{ $_.GetNetworkConnectivityLevel() -gt 0 }} | Select-Object -First 1
-
+    $internet = Get-InternetProfile
     if (-not $internet) {{
         Write-Output "NO_INTERNET"
         exit 1
     }}
 
-    $mgr = $tetheringMgr::CreateFromConnectionProfile($internet)
+    $mgr = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager]::CreateFromConnectionProfile($internet)
     $cfg = $mgr.GetCurrentAccessPointConfiguration()
     $cfg.Ssid = '{ssid}'
     $cfg.Passphrase = '{pw}'
+    Await-Action ($mgr.ConfigureAccessPointAsync($cfg))
 
-    $task = $asm::AsTask($mgr.ConfigureAccessPointAsync($cfg))
-    $task.Wait(8000)
+    $resultType = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringOperationResult]
+    $result = Await-Operation ($mgr.StartTetheringAsync()) $resultType
 
-    $task2 = $asm::AsTask($mgr.StartTetheringAsync())
-    $task2.Wait(15000)
-
-    if ($task2.Result.Status -eq [Windows.Networking.NetworkOperators.TetheringOperationStatus]::Success) {{
+    if ($result.Status -eq [Windows.Networking.NetworkOperators.TetheringOperationStatus]::Success) {{
         Write-Output "OK"
     }} else {{
-        Write-Output "FAIL:$($task2.Result.Status)"
+        Write-Output "FAIL:$($result.Status)"
     }}
 }} catch {{
     Write-Output "ERROR:$($_.Exception.Message)"
@@ -158,7 +245,8 @@ try {{
             result = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive",
                  "-ExecutionPolicy", "Bypass", "-Command", ps_script],
-                capture_output=True, text=True, timeout=25
+                capture_output=True, text=True, timeout=25,
+                creationflags=_NO_WINDOW,
             )
             out = result.stdout.strip()
             if "OK" in out:
@@ -170,22 +258,22 @@ try {{
             return False, str(e)
 
     def _stop_winrt(self):
-        ps_script = """
-$ErrorActionPreference = 'SilentlyContinue'
-$asm = [System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeSystemExtensions]
-$profiles = [Windows.Networking.Connectivity.NetworkInformation]::GetConnectionProfiles()
-$internet = $profiles | Where-Object { $_.GetNetworkConnectivityLevel() -gt 0 } | Select-Object -First 1
-if ($internet) {
-    $mgr = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager]::CreateFromConnectionProfile($internet)
-    $task = $asm::AsTask($mgr.StopTetheringAsync())
-    $task.Wait(10000)
-}
+        ps_script = _WINRT_PRELUDE + """
+try {
+    $internet = Get-InternetProfile
+    if ($internet) {
+        $mgr = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager]::CreateFromConnectionProfile($internet)
+        $resultType = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringOperationResult]
+        Await-Operation ($mgr.StopTetheringAsync()) $resultType | Out-Null
+    }
+} catch {}
 """
         try:
             subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive",
                  "-ExecutionPolicy", "Bypass", "-Command", ps_script],
-                capture_output=True, timeout=14
+                capture_output=True, timeout=14,
+                creationflags=_NO_WINDOW,
             )
         except Exception:
             pass
@@ -194,14 +282,17 @@ if ($internet) {
 
     def _try_netsh(self, ssid: str, pw: str) -> Tuple[bool, str]:
         """
-        Legacy hosted network via netsh.
-        Resets the virtual adapter first to fix 'not in correct state' errors.
+        Legacy hosted network via netsh. Only relevant on older Wi-Fi drivers
+        that still implement it — many current drivers report "Hosted
+        network supported: No" (check with `netsh wlan show drivers`), and
+        no amount of adapter resetting here will change that; it's a driver
+        capability, not app or Windows-service state.
         """
         # Step 1: stop any existing hosted network, then reset the virtual adapter
         subprocess.run(["netsh", "wlan", "stop", "hostednetwork"],
-                       capture_output=True)
+                       capture_output=True, creationflags=_NO_WINDOW)
         subprocess.run(["netsh", "wlan", "set", "hostednetwork", "mode=disallow"],
-                       capture_output=True)
+                       capture_output=True, creationflags=_NO_WINDOW)
 
         reset_ps = """
 Get-NetAdapter -IncludeHidden |
@@ -217,7 +308,8 @@ Get-NetAdapter -IncludeHidden |
             subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive",
                  "-ExecutionPolicy", "Bypass", "-Command", reset_ps],
-                capture_output=True, timeout=10
+                capture_output=True, timeout=10,
+                creationflags=_NO_WINDOW,
             )
         except Exception:
             pass
@@ -232,22 +324,25 @@ Get-NetAdapter -IncludeHidden |
             ["netsh", "wlan", "start", "hostednetwork"],
         ]
         for cmd in cmds:
-            r = subprocess.run(cmd, capture_output=True, text=True)
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               creationflags=_NO_WINDOW)
             if r.returncode != 0:
                 err = (r.stdout + r.stderr).strip()
                 return False, (
                     f"{err}\n\n"
-                    "Tip: The Windows Mobile Hotspot (Settings app) is more\n"
-                    "reliable on modern drivers. Click 'Open Hotspot Settings'\n"
-                    "to enable it there — the hub will serve content on that\n"
-                    "network automatically without needing this toggle."
+                    "Tip: run 'netsh wlan show drivers' and check \"Hosted "
+                    "network supported\" — many current Wi-Fi drivers report "
+                    "No, meaning this legacy method can never work here "
+                    "regardless of adapter state. Mobile Hotspot (above) is "
+                    "the supported path on those drivers."
                 )
         return True, "Netsh hotspot started."
 
     def _stop_netsh(self):
         try:
             subprocess.run(["netsh", "wlan", "stop", "hostednetwork"],
-                           capture_output=True, timeout=8)
+                           capture_output=True, timeout=8,
+                           creationflags=_NO_WINDOW)
         except Exception:
             pass
 

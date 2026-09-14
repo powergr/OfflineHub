@@ -1,0 +1,75 @@
+name: Build Release Installer
+
+# Builds OfflineHub_Setup.exe the same way build.bat does locally (Nuitka
+# standalone compile, then Inno Setup packaging) and publishes it as a
+# GitHub Release asset. Push a tag like "v0.2.5" to trigger a real release,
+# or run manually (workflow_dispatch) to just get the built .exe as an
+# artifact without publishing a release, e.g. to test a workflow change.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install nuitka
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build OfflineHub.exe and package the installer
+        shell: cmd
+        run: build.bat
+
+      - name: Verify the installer was produced
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "Output\OfflineHub_Setup.exe")) {
+            throw "Output\OfflineHub_Setup.exe was not produced - build.bat failed."
+          }
+          Get-Item "Output\OfflineHub_Setup.exe" | Select-Object Name, Length
+
+      - name: Upload installer as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OfflineHub_Setup
+          path: Output\OfflineHub_Setup.exe
+          if-no-files-found: error
+
+      - name: Read app version
+        id: version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $v = (Get-Content VERSION -Raw).Trim()
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Output\OfflineHub_Setup.exe
+          name: "OfflineHub v${{ steps.version.outputs.version }}"
+          generate_release_notes: true

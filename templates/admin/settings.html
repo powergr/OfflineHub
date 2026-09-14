@@ -1,29 +1,51 @@
 {% extends "admin/base.html" %}
 {% block title %}Settings{% endblock %}
 {% block content %}
-<h1>⚙️ Settings</h1>
+<div class="page-header">
+  <div>
+    <h1>⚙️ Settings</h1>
+    <p class="sub">Portal, startup, and account settings.</p>
+  </div>
+</div>
 
 <form method="post">
-  <div class="card">
-    <label for="portal_port">Portal Port</label>
-    <input type="number" id="portal_port" name="portal_port" value="{{ config.portal_port }}" />
+  <div class="settings-layout">
+    <div class="card">
+      <div class="section-title" style="margin-top:0">General</div>
+      <label for="portal_port">Portal Port</label>
+      <input type="number" id="portal_port" name="portal_port" value="{{ config.portal_port }}" />
 
-    <label style="display:flex; align-items:center; gap:8px; margin-top:16px;">
-      <input type="checkbox" name="autostart" {{ "checked" if config.autostart }} style="width:auto;" />
-      Start on Windows boot
-    </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:18px;">
+        <input type="checkbox" name="autostart" {{ "checked" if config.autostart }} style="width:auto;" />
+        Start on Windows boot
+      </label>
+    </div>
 
-    <div class="muted" style="margin-top:16px;">Version {{ config.version }}</div>
+    <div class="card">
+      <div class="section-title" style="margin-top:0">Change Admin Password</div>
+      <label for="new_password">New Password</label>
+      <input type="password" id="new_password" name="new_password" />
+      <label for="confirm_password">Confirm</label>
+      <input type="password" id="confirm_password" name="confirm_password" />
+    </div>
+
+    <div class="card about-card">
+      <div class="section-title" style="margin-top:0">About</div>
+      <div class="version-badge" style="font-size:13px; padding:6px 14px;">v{{ app_version }}</div>
+      <p class="muted" style="margin-top: 12px;">
+        Offline Knowledge Hub — Wikipedia, Gutenberg, offline maps, and a
+        small offline LLM assistant, served over your local Wi-Fi with no
+        internet required.
+      </p>
+    </div>
   </div>
 
-  <div class="card">
-    <h2 style="margin-top:0">Change Admin Password</h2>
-    <label for="new_password">New Password</label>
-    <input type="password" id="new_password" name="new_password" />
-    <label for="confirm_password">Confirm</label>
-    <input type="password" id="confirm_password" name="confirm_password" />
-  </div>
-
-  <button type="submit">💾 Save All Settings</button>
+  <button type="submit" style="margin-top: 20px;">💾 Save All Settings</button>
 </form>
+
+<style>
+  .settings-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .about-card { grid-column: 1 / -1; }
+  @media (max-width: 860px) { .settings-layout { grid-template-columns: 1fr; } }
+</style>
 {% endblock %}

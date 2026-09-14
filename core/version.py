@@ -1,9 +1,10 @@
 """
 version — single source of truth for the app version.
 
-Reads the VERSION file at the app root (bundled next to main.exe in frozen
-builds via build.bat's --include-data-files) so build.bat, installer.iss,
-main.py, and the Settings page never drift out of sync with each other.
+Reads the VERSION file at the app root (bundled next to OfflineHub.exe in
+frozen builds via build.bat's --include-data-files) so build.bat,
+installer.iss, main.py, and the Settings page never drift out of sync with
+each other.
 """
 
 import os

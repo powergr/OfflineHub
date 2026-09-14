@@ -1,38 +1,53 @@
 {% extends "admin/base.html" %}
 {% block title %}Hotspot{% endblock %}
 {% block content %}
-<h1>📡 Wi-Fi Hotspot</h1>
+<div class="page-header">
+  <div>
+    <h1>📡 Wi-Fi Hotspot</h1>
+    <p class="sub">Students connect to this network and open any browser to reach the hub.</p>
+  </div>
+  <span class="badge {{ 'badge-ready' if running else 'badge-idle' }}">{{ "● Running" if running else "○ Stopped" }}</span>
+</div>
 
 {% if not is_admin %}
-<div class="card" style="border-color:#cc6600">
+<div class="card" style="border-color:#cc6600; margin-bottom: 20px;">
   <strong>⚠️ Administrator rights required</strong>
   <p class="muted">Restart the app as administrator to control the hotspot.</p>
 </div>
 {% endif %}
 
-<div class="card">
-  <form method="post">
-    <label for="ssid">SSID</label>
-    <input type="text" id="ssid" name="ssid" value="{{ config.hotspot.ssid }}" />
-    <label for="password">Password</label>
-    <input type="text" id="password" name="password" value="{{ config.hotspot.password }}" />
-    <button type="submit">💾 Save</button>
-  </form>
+<div class="hotspot-layout">
+  <div class="card">
+    <div class="section-title" style="margin-top:0">Network Settings</div>
+    <form method="post">
+      <label for="ssid">SSID</label>
+      <input type="text" id="ssid" name="ssid" value="{{ config.hotspot.ssid }}" />
+      <label for="password">Password</label>
+      <input type="text" id="password" name="password" value="{{ config.hotspot.password }}" />
+      <button type="submit" style="margin-top:18px;">💾 Save</button>
+    </form>
 
-  <form method="post" action="{{ url_for('admin.hotspot_toggle') }}" style="display:inline-block; margin-right:8px;">
-    <button type="submit" class="{{ 'secondary' if running else '' }}">
-      {{ "🟢 Stop Hotspot" if running else "▶ Start Hotspot" }}
-    </button>
-  </form>
+    <div style="margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border);">
+      <form method="post" action="{{ url_for('admin.hotspot_toggle') }}">
+        <button type="submit" class="{{ 'secondary' if running else '' }}" style="width:100%;">
+          {{ "🟢 Stop Hotspot" if running else "▶ Start Hotspot" }}
+        </button>
+      </form>
+      <p class="muted" style="margin-top: 10px;">IP address: {{ ip }}</p>
+    </div>
+  </div>
 
-  <p class="muted">Status: {{ "Running" if running else "Stopped" }} · IP: {{ ip }}</p>
+  <div class="card">
+    <div class="section-title" style="margin-top:0">Connected Devices</div>
+    <div id="devices"><p class="muted">Loading…</p></div>
+    <button class="secondary" onclick="refreshDevices()" style="margin-top:14px;">🔄 Refresh</button>
+  </div>
 </div>
 
-<div class="card">
-  <h2 style="margin-top:0">Connected Devices</h2>
-  <div id="devices"><p class="muted">Loading…</p></div>
-  <button class="secondary" onclick="refreshDevices()">🔄 Refresh</button>
-</div>
+<style>
+  .hotspot-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 860px) { .hotspot-layout { grid-template-columns: 1fr; } }
+</style>
 
 <script>
   function refreshDevices() {

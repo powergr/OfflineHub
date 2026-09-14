@@ -51,14 +51,59 @@ CATALOGUE: dict[str, dict] = {
         "opds_flavour": None,
         "server":      "zim",
     },
+    "vikidia_en": {
+        "name":        "Vikidia",
+        "emoji":       "🧒",
+        "description": "A kids' encyclopedia written for ~8-13 year olds.",
+        "opds_name":   "vikidia_en_all",
+        "opds_flavour": "maxi",
+        "server":      "zim",
+    },
+    "wikipedia_en_simple": {
+        "name":        "Wikipedia (Simple English)",
+        "emoji":       "🔤",
+        "description": "Simplified vocabulary and shorter sentences — good for younger or ESL readers.",
+        "opds_name":   "wikipedia_en-simple_all",
+        "opds_flavour": "mini",
+        "server":      "zim",
+    },
+    "phet_simulations": {
+        "name":        "PhET Interactive Simulations",
+        "emoji":       "🧪",
+        "description": "Free interactive science & math simulations from University of Colorado Boulder.",
+        "opds_name":   "phet_en_all",
+        "opds_flavour": None,
+        "server":      "zim",
+    },
+    "wikibooks_en": {
+        "name":        "Wikibooks",
+        "emoji":       "📓",
+        "description": "Collaboratively written textbooks and study guides across subjects.",
+        "opds_name":   "wikibooks_en_all",
+        "opds_flavour": "maxi",
+        "server":      "zim",
+    },
+    "wiktionary_en_simple": {
+        "name":        "Wiktionary (Simple English)",
+        "emoji":       "📔",
+        "description": "A basic dictionary with simplified definitions.",
+        "opds_name":   "wiktionary_en-simple_all",
+        "opds_flavour": "nopic",
+        "server":      "zim",
+    },
 }
 
 # Last-known-good fallback, used only if the live OPDS lookup fails (e.g. no
 # internet at that moment, or the API changes shape). May go stale over time
 # like the old hardcoded catalogue did — it's a safety net, not the primary path.
 _FALLBACK_URLS = {
-    "wikipedia_en_mini": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_mini_2026-06.zim",
-    "gutenberg_lcc_l":   "https://download.kiwix.org/zim/gutenberg/gutenberg_en_lcc-l_2026-03.zim",
+    "wikipedia_en_mini":   "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_mini_2026-06.zim",
+    "gutenberg_lcc_l":     "https://download.kiwix.org/zim/gutenberg/gutenberg_en_lcc-l_2026-03.zim",
+    "vikidia_en":          "https://download.kiwix.org/zim/vikidia/vikidia_en_all_maxi_2026-06.zim",
+    "wikipedia_en_simple": "https://download.kiwix.org/zim/wikipedia/wikipedia_en-simple_all_mini_2026-06.zim",
+    "phet_simulations":    "https://download.kiwix.org/zim/phet/phet_en_all_2026-08.zim",
+    "wikibooks_en":        "https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_maxi_2026-04.zim",
+    "wiktionary_en_simple": "https://download.kiwix.org/zim/wiktionary/wiktionary_en-simple_all_nopic_2026-07.zim",
 }
 
 # ── Offline LLM (onnxruntime-genai model) ────────────────────────────────────

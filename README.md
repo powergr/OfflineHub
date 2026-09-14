@@ -74,10 +74,10 @@ sign the app is running.
 
 ## How Content Works
 
-| Module type | Engine | Notes |
-| ----------- | ------ | ----- |
-| `zim`       | `libzim` (in-process) | Wikipedia, Gutenberg, Khan Academy, or any Kiwix ZIM. No subprocess, no port per module. |
-| `mbtiles`   | sqlite (in-process) | Offline vector/raster maps, served straight from the `.mbtiles` file. |
+| Module type | Engine                           | Notes                                                                                    |
+| ----------- | -------------------------------- | ---------------------------------------------------------------------------------------- |
+| `zim`       | `libzim` (in-process)            | Wikipedia, Gutenberg, Khan Academy, or any Kiwix ZIM. No subprocess, no port per module. |
+| `mbtiles`   | sqlite (in-process)              | Offline vector/raster maps, served straight from the `.mbtiles` file.                    |
 | `llm`       | `onnxruntime-genai` (in-process) | A small offline chat model. Model weights download like content, not as a vendor binary. |
 
 ZIM downloads are resolved live against Kiwix's OPDS catalog
@@ -86,6 +86,14 @@ filename — Kiwix rotates dated snapshot names and deletes old ones, so a
 hardcoded URL eventually 404s. The Admin panel's "Discover Content" search
 box also lets you search the entire live Kiwix library, not just the
 curated quick-start list.
+
+The curated quick-start list (`core/downloader.py`'s `CATALOGUE`) covers
+grades 1 through high school: **Wikipedia** (mini) and **Gutenberg**
+(literature) for general reference, **Vikidia** (a kids' encyclopedia for
+~8-13 year olds) and **Wikipedia Simple English** for younger/ESL readers,
+and **PhET Simulations** (interactive science/math) and **Wikibooks**
+(textbooks/study guides) for middle/high school. All were checked against
+the live Kiwix catalog, not assumed from memory.
 
 Khan Academy is deliberately **not** in the curated quick-start list: the
 current Kiwix library only publishes a single ~180GB "all" ZIM for it (no
@@ -99,6 +107,22 @@ raw Windows file-in-use error, since the running app holds that module's
 file open in memory. Installing is also refused server-side for the same
 reason if you ever hit the API directly. Remove the module first (Admin →
 Modules → Remove) if you actually want to replace it.
+
+---
+
+## Companion Content Pack
+
+A pre-downloaded zip of the quick-start modules, for testing or a first
+install without waiting on multiple large downloads:
+
+**[Download OfflineHub_CompanionPack.zip (~1.6GB)](https://www.dropbox.com/scl/fi/m3ef49rm14idr32h0i6mn/OfflineHub_CompanionPack.zip?rlkey=aptcv0ku09rxf5th467gwbh0r&st=o8ymmhgg&dl=0)**
+
+Contains Wikipedia (Simple English), Vikidia, Wiktionary (Simple English),
+PhET Simulations, and the Qwen2.5 0.5B offline assistant. Unzip it directly
+into `C:\OfflineHub\` so it creates `C:\OfflineHub\modules\<key>\...` — the
+app picks up any module folder with a `manifest.json` automatically on next
+launch, no admin-panel download needed. Built with
+`tools/build_companion_pack.py`.
 
 ---
 
@@ -128,12 +152,12 @@ my_module/
 }
 ```
 
-| Field         | Required | Values                    | Notes                          |
-| ------------- | -------- | ------------------------- | ------------------------------- |
-| `name`        | ✅       | Any string                | Card title                      |
-| `emoji`       | ✅       | Any single emoji          | Shown next to the title         |
-| `type`        | ✅       | `zim` / `mbtiles` / `llm` | Controls how content is read    |
-| `format`      | ❌       | `raster` / `vector`       | Maps (`mbtiles`) only           |
+| Field         | Required | Values                    | Notes                             |
+| ------------- | -------- | ------------------------- | --------------------------------- |
+| `name`        | ✅       | Any string                | Card title                        |
+| `emoji`       | ✅       | Any single emoji          | Shown next to the title           |
+| `type`        | ✅       | `zim` / `mbtiles` / `llm` | Controls how content is read      |
+| `format`      | ❌       | `raster` / `vector`       | Maps (`mbtiles`) only             |
 | `description` | ❌       | Any string                | Shown in smaller text on the card |
 
 ---
@@ -182,12 +206,12 @@ Hotspot tab of the Admin panel.
 
 Open `http://<hub-ip>:8000/admin` (password-gated after first-run setup).
 
-| Page     | Purpose                                        |
-| -------- | ----------------------------------------------- |
-| Modules  | Download content, add files/ZIPs, remove        |
-| Hotspot  | Configure SSID / password, toggle hotspot       |
-| Services | View loaded modules, unload to free memory      |
-| Settings | Portal port, boot autostart, change password    |
+| Page     | Purpose                                      |
+| -------- | -------------------------------------------- |
+| Modules  | Download content, add files/ZIPs, remove     |
+| Hotspot  | Configure SSID / password, toggle hotspot    |
+| Services | View loaded modules, unload to free memory   |
+| Settings | Portal port, boot autostart, change password |
 
 ---
 
@@ -206,7 +230,7 @@ Run `build.bat`. It compiles `main.py` into `main.dist\`, then packages
 `main.dist\`, `assets\`, and `config.json` into `Output\OfflineHub_Setup.exe`.
 
 `libzim` and `onnxruntime-genai` ship compiled native extensions with
-backing DLLs — after building, **run `main.dist\main.exe` directly**, open a
+backing DLLs — after building, **run `main.dist\OfflineHub.exe` directly**, open a
 ZIM module, and send one chat message before trusting the build. Missing-DLL
 failures from Nuitka's standalone packaging only show up in the frozen exe,
 never when running `python main.py` from source.
@@ -236,7 +260,99 @@ never when running `python main.py` from source.
 Full history isn't tracked in a separate file — this is a running summary,
 newest first. Bump [`VERSION`](VERSION) when the next set of changes ships.
 
-**0.2.1**
+## 0.2.5
+
+- Trimmed the installer from ~46MB to ~44MB (main.dist from 185MB to 170MB
+  uncompressed) by fixing two real packaging issues, both confirmed by
+  actually testing the change rather than assuming it was safe:
+  - Removed a byte-identical duplicate of `onnxruntime-genai.dll` (~7.2MB)
+    that Nuitka was copying to both `main.dist/` and `main.dist/onnxruntime_genai/`
+    — confirmed only the copy next to `onnxruntime_genai.pyd` is ever loaded
+    (Windows checks a DLL's own directory first), by deleting the top-level
+    one and re-running a real chat completion.
+  - Excluded Pillow's AVIF image codec (`PIL._avif`, ~7.5MB) via
+    `--nofollow-import-to=PIL._avif` — Pillow is only used here to load the
+    tray icon's `.ico` file, and its plugin system already wraps each
+    format's import in try/except, so a missing codec is silently skipped,
+    not a crash. Confirmed by deleting `_avif.pyd` from a built copy and
+    re-testing the full app (tray icon, portal, ZIM content, LLM chat).
+  - Confirmed via `dumpbin /dependents` that the two biggest remaining
+    files — `icudt74.dll` (29MB, a real dependency of libzim's Unicode-aware
+    search) and the bundled OpenBLAS library (19.6MB, a real dependency of
+    numpy, which onnxruntime-genai's Python bindings return arrays from) —
+    are both genuine requirements of features already in use, not bloat.
+
+## 0.2.4
+
+- Added four K-12-relevant Quick Start entries to `core/downloader.py`'s
+  `CATALOGUE`, checked against Kiwix's live catalog rather than assumed:
+  **Vikidia** (kids' encyclopedia, ~8-13yo), **Wikipedia Simple English**
+  (younger/ESL readers), **PhET Interactive Simulations** (science/math),
+  and **Wikibooks** (textbooks/study guides). Verified end-to-end, not just
+  that they resolve — actually downloaded and opened PhET's real content
+  through the running app.
+
+## 0.2.3
+
+- Fixed the portal being unreachable from devices connected to the hotspot,
+  even though the hotspot itself connects fine. Root cause: on any machine
+  with both an internet uplink (Ethernet/Wi-Fi) and an active hotspot, those
+  are two different adapters on two different subnets — confirmed live on
+  this machine: Ethernet at `172.20.147.29`, the hotspot's own AP at
+  `192.168.137.1`. Both `HotspotManager.get_local_ip()` and a near-identical
+  duplicate in `core/blueprints/portal.py` used the "connect a UDP socket to
+  8.8.8.8, read the source address" trick, which always returns the internet
+  uplink's address — exactly the one address a phone on the hotspot can't
+  reach. Both the admin Hotspot page and the portal's own IP badge now
+  prefer the hotspot's `192.168.137.0/24` address when present (the portal
+  route now just calls the one corrected `HotspotManager` method instead of
+  duplicating the logic).
+- Fixed "Connected Devices" on the Hotspot page always showing empty even
+  with a device connected: Windows lists Mobile Hotspot clients in `arp -a`
+  as `static`, not `dynamic`, and the parser only matched `dynamic`.
+- The installer now adds a Windows Firewall rule allowing the app through by
+  program path during install (and removes it on uninstall) — confirmed live
+  that no such rule existed beforehand, and since the app runs windowless and
+  elevated, the normal interactive "allow this app through the firewall?"
+  prompt a console app would trigger may never actually surface to the user,
+  silently leaving the portal unreachable regardless of the IP-address fix
+  above.
+
+## 0.2.2
+
+- Renamed the compiled executable from `main.exe` to `OfflineHub.exe` — mainly
+  so the uninstaller's `taskkill /IM` (below) can't collide with some
+  unrelated process that happens to also be named `main.exe`.
+- Fixed the Wi-Fi Hotspot start failing with "the group or resource is not
+  in the correct state" on modern Wi-Fi drivers, and popping open several
+  visible PowerShell windows while trying. Root cause: the WinRT Mobile
+  Hotspot script (tried first, before the legacy `netsh` fallback) referenced
+  `WindowsRuntimeSystemExtensions` under the wrong namespace, never loaded
+  the assembly it actually lives in, and never explicitly loaded the WinRT
+  namespaces it needs — so it always failed silently and fell through to
+  `netsh`, which many current drivers (`netsh wlan show drivers` →
+  `Hosted network supported: No`) have dropped support for entirely. Fixed
+  and confirmed by actually starting and stopping a real hotspot through it.
+  Every subprocess call in `core/hotspot.py` also now runs with
+  `CREATE_NO_WINDOW`, which is what was popping the console windows.
+- Fixed uninstalling the app while it's still running: the installer never
+  stopped the running process before deleting files, so it could fail
+  partway through and leave the app still running. Worse — confirmed by
+  testing directly — killing the process alone doesn't stop an active
+  hotspot, since Windows manages Mobile Hotspot as a system service
+  independent of the app's lifetime; a force-killed app can leave a Wi-Fi
+  network broadcasting indefinitely with nothing left to turn it off. The
+  uninstaller now runs `uninstall_stop_hotspot.ps1` (stops both the WinRT
+  and legacy hotspot) before `taskkill`-ing the process, before removing
+  any files.
+- Redesigned the admin dashboards (Setup, Modules, Hotspot, Services,
+  Settings) from a narrow centered column into wide, landscape, grid-based
+  layouts (`assets/portal/style.css` is now a shared stylesheet across
+  admin and the student portal), and the version number (`VERSION`) is now
+  shown on every page via a Flask context processor instead of nowhere.
+
+## 0.2.1
+
 - Added the actual way to get the offline LLM: Admin → Modules → Offline
   Assistant now downloads a real, pre-tested Qwen2.5 0.5B model in one click
   (`core/downloader.py`'s `LLM_CATALOGUE`, wired to a new
@@ -252,6 +368,7 @@ newest first. Bump [`VERSION`](VERSION) when the next set of changes ships.
   of attempting the overwrite at all.
 
 **0.2.0** — the vendor-binary-free rewrite
+
 - Removed `vendor/kiwix-serve.exe` and `vendor/Kolibri.exe` entirely, and all
   Kolibri support — Kolibri's Windows distribution bundles a full Python
   runtime and can't run as a standalone extracted exe the way the old README

@@ -4,8 +4,6 @@ what students connect to over the hotspot. Serves ZIM content in-process
 (no kiwix-serve subprocess), map tiles from mbtiles, and the LLM chat UI.
 """
 
-import socket
-
 from flask import Blueprint, Response, abort, current_app, jsonify, redirect, render_template, request, url_for
 
 bp = Blueprint("portal", __name__)
@@ -21,6 +19,10 @@ def _registry():
 
 def _tile_server():
     return current_app.config["TILE_SERVER"]
+
+
+def _hotspot_mgr():
+    return current_app.config["HOTSPOT_MGR"]
 
 
 # ── Home page ─────────────────────────────────────────────────────────────────
@@ -50,7 +52,7 @@ def api_modules():
 
 @bp.route("/api/ip")
 def api_ip():
-    return jsonify({"ip": _local_ip()})
+    return jsonify({"ip": _hotspot_mgr().get_local_ip()})
 
 
 # ── ZIM content (replaces the old kiwix-serve subprocess) ────────────────────
@@ -155,14 +157,3 @@ def chat_stream(module_id):
         yield "event: done\ndata: end\n\n"
 
     return Response(event_stream(), mimetype="text/event-stream")
-
-
-# ── Utility ───────────────────────────────────────────────────────────────────
-
-def _local_ip() -> str:
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
-    except Exception:
-        return "127.0.0.1"

@@ -4,25 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Search — {{ module_id }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
     <style>
-      :root { --bg:#0d1117; --surface:#161b22; --border:#30363d; --accent2:#1f6feb; --text:#e6edf3; --muted:#8b949e; }
-      * { box-sizing: border-box; }
-      body { margin:0; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-      .wrap { max-width: 700px; margin: 0 auto; padding: 32px 20px; }
+      .wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px; }
+      .top-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
       form { display:flex; gap:8px; margin-bottom: 24px; }
-      input[type=text] { flex:1; padding:10px 14px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:15px; }
-      button { padding:10px 18px; border-radius:8px; border:none; background:var(--accent2); color:#fff; font-weight:600; cursor:pointer; }
+      input[type=text] { margin-top: 0; font-size:15px; }
       ul { list-style:none; padding:0; }
       li { padding:12px 0; border-bottom:1px solid var(--border); }
-      a { color:#58a6ff; text-decoration:none; }
+      a { text-decoration:none; }
       a:hover { text-decoration:underline; }
-      .muted { color: var(--muted); font-size: 13px; }
-      .back { display:inline-block; margin-bottom: 16px; }
+      .back { color: var(--muted); }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <a class="back" href="/content/{{ module_id }}/">&larr; Back to article</a>
+      <div class="top-row">
+        <a class="back" href="/content/{{ module_id }}/">&larr; Back to article</a>
+        <span class="version-badge">v{{ app_version }}</span>
+      </div>
       <form method="get">
         <input type="text" name="q" value="{{ query }}" placeholder="Search this library…" autofocus />
         <button type="submit">Search</button>

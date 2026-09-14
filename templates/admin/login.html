@@ -1,13 +1,20 @@
 {% extends "admin/base.html" %}
 {% block title %}Login{% endblock %}
 {% block bare %}
-<div class="card" style="width: 340px;">
-  <h1>🔐 Admin Login</h1>
-  {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
-  <form method="post">
+<div class="card" style="width: 360px; max-width: 92vw;">
+  <div style="text-align:center; margin-bottom: 6px;">
+    <div style="font-size: 34px;">🔐</div>
+    <h1 style="font-size: 20px; font-weight: 700; margin-top: 8px;">Admin Login</h1>
+    <p class="muted" style="margin-top: 4px;">Offline Knowledge Hub</p>
+  </div>
+  {% if error %}<div class="flash flash-error" style="margin-top: 16px;">{{ error }}</div>{% endif %}
+  <form method="post" style="margin-top: 10px;">
     <label for="password">Password</label>
     <input type="password" id="password" name="password" autofocus required />
-    <button type="submit" style="width:100%; justify-content:center;">Log In</button>
+    <button type="submit" style="width:100%; justify-content:center; margin-top:18px;">Log In</button>
   </form>
+  <div style="text-align:center; margin-top: 18px;">
+    <span class="version-badge">v{{ app_version }}</span>
+  </div>
 </div>
 {% endblock %}

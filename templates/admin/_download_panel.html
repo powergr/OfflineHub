@@ -1,57 +1,66 @@
-<div class="card">
-  <h2 style="margin-top:0">📦 Quick Start</h2>
-  <div id="quickstart-list">
-    {% for key, item in quickstart.items() %}
-    <div class="row" id="qs-row-{{ key }}">
-      <div>
-        <div>{{ item.emoji }} {{ item.name }}</div>
-        <div class="muted">
-          {{ item.description }} —
-          {% if item.size %}{{ (item.size / 1073741824) | round(1) }} GB{% else %}size unknown{% endif %}
-          {% if not item.live %}<span title="{{ item.error }}">(using last-known URL, could not reach the live catalogue)</span>{% endif %}
-        </div>
-        <div class="progress" id="qs-progress-{{ key }}" style="display:none"><div></div></div>
-      </div>
-      {% if key in (installed_keys | default([])) %}
-        <button class="btn secondary" disabled>✓ Installed</button>
-      {% else %}
-        <button class="btn" onclick="startQuickstart('{{ key }}')" id="qs-btn-{{ key }}">Download</button>
-      {% endif %}
+<div class="section-title">📦 Quick Start</div>
+<div class="grid" id="quickstart-list">
+  {% for key, item in quickstart.items() %}
+  <div class="card dl-card" id="qs-row-{{ key }}">
+    <div class="dl-card-head">
+      <span class="dl-emoji">{{ item.emoji }}</span>
+      <span class="dl-name">{{ item.name }}</span>
     </div>
-    {% endfor %}
+    <p class="dl-desc">{{ item.description }}</p>
+    <div class="dl-meta">
+      {% if item.size %}{{ (item.size / 1073741824) | round(1) }} GB{% else %}size unknown{% endif %}
+      {% if not item.live %}· <span title="{{ item.error }}">using last-known URL</span>{% endif %}
+    </div>
+    <div class="progress" id="qs-progress-{{ key }}" style="display:none"><div></div></div>
+    {% if key in (installed_keys | default([])) %}
+      <button class="btn secondary" disabled>✓ Installed</button>
+    {% else %}
+      <button class="btn" onclick="startQuickstart('{{ key }}')" id="qs-btn-{{ key }}">Download</button>
+    {% endif %}
   </div>
+  {% endfor %}
 </div>
 
-<div class="card">
-  <h2 style="margin-top:0">🤖 Offline Assistant</h2>
-  <p class="muted">A small chat assistant that runs entirely on this machine — no internet, no cloud.</p>
-  <div id="llm-list">
-    {% for key, item in (llm_catalogue | default({})).items() %}
-    <div class="row" id="llm-row-{{ key }}">
-      <div>
-        <div>{{ item.emoji }} {{ item.name }}</div>
-        <div class="muted">{{ item.description }} — {{ (item.size / 1073741824) | round(1) }} GB</div>
-        <div class="progress" id="llm-progress-{{ key }}" style="display:none"><div></div></div>
-      </div>
-      {% if key in (installed_keys | default([])) %}
-        <button class="btn secondary" disabled>✓ Installed</button>
-      {% else %}
-        <button class="btn" onclick="startLLM('{{ key }}')" id="llm-btn-{{ key }}">Download</button>
-      {% endif %}
+<div class="section-title">🤖 Offline Assistant</div>
+<p class="muted" style="margin-bottom: 14px;">A small chat assistant that runs entirely on this machine — no internet, no cloud.</p>
+<div class="grid" id="llm-list">
+  {% for key, item in (llm_catalogue | default({})).items() %}
+  <div class="card dl-card" id="llm-row-{{ key }}">
+    <div class="dl-card-head">
+      <span class="dl-emoji">{{ item.emoji }}</span>
+      <span class="dl-name">{{ item.name }}</span>
     </div>
-    {% endfor %}
+    <p class="dl-desc">{{ item.description }}</p>
+    <div class="dl-meta">{{ (item.size / 1073741824) | round(1) }} GB</div>
+    <div class="progress" id="llm-progress-{{ key }}" style="display:none"><div></div></div>
+    {% if key in (installed_keys | default([])) %}
+      <button class="btn secondary" disabled>✓ Installed</button>
+    {% else %}
+      <button class="btn" onclick="startLLM('{{ key }}')" id="llm-btn-{{ key }}">Download</button>
+    {% endif %}
   </div>
+  {% endfor %}
 </div>
 
+<div class="section-title">🔎 Discover More Content</div>
 <div class="card">
-  <h2 style="margin-top:0">🔎 Discover More Content</h2>
-  <p class="muted">Search the live Kiwix library for anything else (subjects, languages, other wikis).</p>
-  <form onsubmit="return doSearch(event)">
-    <input type="text" id="search-q" placeholder="e.g. wikipedia french, science, khan academy" />
-    <button type="submit" class="secondary">Search</button>
+  <p class="muted" style="margin-bottom: 12px;">Search the live Kiwix library for anything else (subjects, languages, other wikis).</p>
+  <form onsubmit="return doSearch(event)" style="display:flex; gap:10px;">
+    <input type="text" id="search-q" placeholder="e.g. wikipedia french, science, khan academy" style="margin-top:0;" />
+    <button type="submit" class="secondary" style="flex-shrink:0;">Search</button>
   </form>
-  <div id="search-results"></div>
+  <div class="grid" id="search-results" style="margin-top: 16px;"></div>
 </div>
+
+<style>
+  .dl-card { display: flex; flex-direction: column; gap: 4px; }
+  .dl-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 2px; }
+  .dl-emoji { font-size: 1.6rem; line-height: 1; }
+  .dl-name { font-weight: 700; font-size: 14.5px; line-height: 1.3; }
+  .dl-desc { color: var(--muted); font-size: 12.5px; line-height: 1.5; flex: 1; min-height: 34px; }
+  .dl-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .dl-card > .btn, .dl-card > button { margin-top: 14px; width: 100%; }
+</style>
 
 <script>
   async function pollJob(jobId, onProgress, onDone) {
@@ -135,16 +144,18 @@
         results.innerHTML = "";
         data.results.forEach((item, i) => {
           const gb = (item.size / 1073741824).toFixed(1);
-          const row = document.createElement("div");
-          row.className = "row";
-          row.innerHTML = `
-            <div>
-              <div>${item.title}${item.flavour ? " (" + item.flavour + ")" : ""}</div>
-              <div class="muted">${item.language} · ${item.article_count.toLocaleString()} articles · ${gb} GB</div>
-              <div class="progress" id="sr-progress-${i}" style="display:none"><div></div></div>
+          const card = document.createElement("div");
+          card.className = "card dl-card";
+          card.innerHTML = `
+            <div class="dl-card-head">
+              <span class="dl-emoji">📖</span>
+              <span class="dl-name">${item.title}${item.flavour ? " (" + item.flavour + ")" : ""}</span>
             </div>
+            <p class="dl-desc">${item.summary || ""}</p>
+            <div class="dl-meta">${item.language} · ${item.article_count.toLocaleString()} articles · ${gb} GB</div>
+            <div class="progress" id="sr-progress-${i}" style="display:none"><div></div></div>
             <button class="btn" id="sr-btn-${i}" onclick='startCustom(${i}, ${JSON.stringify(item)})'>Download</button>`;
-          results.appendChild(row);
+          results.appendChild(card);
         });
       });
     return false;

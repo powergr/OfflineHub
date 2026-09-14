@@ -1,25 +1,42 @@
 {% extends "admin/base.html" %}
 {% block title %}Services{% endblock %}
 {% block content %}
-<h1>🛠 Services</h1>
-<p class="muted">Everything runs in-process now — no separate servers to start or crash. "Unload" just frees the in-memory handle; it reopens automatically on next use.</p>
+<div class="page-header">
+  <div>
+    <h1>🛠 Services</h1>
+    <p class="sub">Everything runs in-process — no separate servers to start or crash. "Unload" just frees the in-memory handle; it reopens automatically on next use.</p>
+  </div>
+</div>
 
-<div class="card">
-  {% if not modules %}
-    <p class="muted">No modules installed yet.</p>
-  {% else %}
+{% if not modules %}
+  <div class="card"><p class="muted">No modules installed yet.</p></div>
+{% else %}
+  <div class="grid grid-narrow">
     {% for folder, data, status in modules %}
-    <div class="row">
-      <div>
-        <div>{{ data.emoji }} {{ data.name }} <span class="muted">({{ data.type }})</span></div>
-        <div class="muted">{{ "⚠ error" if status == "error" else ("● loaded" if status == "loaded" else "○ not yet opened") }}</div>
+    <div class="card mod-card">
+      <div class="dl-card-head">
+        <span class="dl-emoji">{{ data.emoji }}</span>
+        <span class="dl-name">{{ data.name }}</span>
+      </div>
+      <div class="muted">({{ data.type }})</div>
+      <div class="mod-card-footer">
+        <span class="badge {{ 'badge-error' if status == 'error' else ('badge-ready' if status == 'loaded' else 'badge-idle') }}">
+          {{ "⚠ error" if status == "error" else ("● loaded" if status == "loaded" else "○ not opened") }}
+        </span>
       </div>
       <form method="post" action="{{ url_for('admin.services_unload') }}">
         <input type="hidden" name="folder" value="{{ folder }}" />
-        <button type="submit" class="secondary" style="margin:0;">Unload</button>
+        <button type="submit" class="secondary">Unload</button>
       </form>
     </div>
     {% endfor %}
-  {% endif %}
-</div>
+  </div>
+{% endif %}
+
+<style>
+  .mod-card { display: flex; flex-direction: column; gap: 4px; }
+  .mod-card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+  .mod-card > form { margin-top: 14px; }
+  .mod-card > form > button { width: 100%; }
+</style>
 {% endblock %}
