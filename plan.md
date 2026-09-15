@@ -144,4 +144,39 @@ from memory or an old list.
     first: which file types, how it gets indexed and searched, and
     whether any storage limit makes sense.
 
+## Phase 7: Fixes from real use
+
+25. ✅ **Self-serve country maps had two real bugs, found from an actual
+    admin report.** Done. A screenshot of Cyprus centered on Nicosia showed
+    a real hole in the middle of the map, with data only at the edges. Two
+    separate causes, both confirmed on the actual installed module (its own
+    mbtiles metadata really did say `maxzoom: 12`), not guessed:
+    - The frontend's vector source (`templates/portal/index.html`) never
+      declared a `maxzoom` of its own, so MapLibre assumed data existed all
+      the way to z22. Zooming in past whatever a module actually had meant
+      requesting tiles that don't exist, getting 404s, and rendering
+      nothing there instead of gracefully reusing the deepest real tile.
+      `/api/modules` (`core/blueprints/portal.py`) now reports each
+      module's real max zoom, straight from its own mbtiles metadata, the
+      same way it already does for `bounds`.
+    - Separately, `core/map_extract.py`'s extraction ceiling (`z12`, set
+      before the POI/road-label style work in item 18's follow-up) was too
+      shallow for that later work to ever show anything: the `pois` and
+      `road-labels` layers don't start rendering until `z13`, and
+      `poi-labels` not until `z15` - a capital city extracted at the old
+      ceiling could never show a single POI, independent of the gap issue
+      above. Raised to `z15` (the live Protomaps build's own real maximum,
+      confirmed via its header), with the per-country tile budget
+      recalibrated so small/city-state-sized countries (Cyprus included)
+      reach that full ceiling while larger countries still auto-reduce.
+
+    Verified by re-extracting the admin's actual Cyprus module end to end
+    through the real code path, not just in isolation: 14,328 tiles, real
+    elapsed time 26 minutes, landed correctly at `maxzoom: 15` in both the
+    `.mbtiles` metadata and the live `/api/modules` response. That's
+    notably slower than the throughput item 18's own numbers assumed
+    (`DEFAULT_TILE_BUDGET`'s comment there is now out of date on the exact
+    minutes, though the reasoning and the auto-reduction behavior still
+    hold) - worth knowing if this ever needs recalibrating again.
+
 ---

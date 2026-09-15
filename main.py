@@ -80,8 +80,8 @@ def _build_tray(config: dict, server, hotspot_mgr, registry):
     def open_admin(icon, item):
         webbrowser.open(base_url + "/admin")
 
-    def quit_app(icon, item):
-        logger.info("Quit requested from tray icon")
+    def quit_app(icon, item=None):
+        logger.info("Quit requested")
         icon.stop()
         try:
             registry.unload_all()
@@ -98,7 +98,8 @@ def _build_tray(config: dict, server, hotspot_mgr, registry):
         pystray.MenuItem("Open Admin", open_admin),
         pystray.MenuItem("Quit", quit_app),
     )
-    return pystray.Icon("OfflineHub", image, "Offline Knowledge Hub", menu)
+    icon = pystray.Icon("OfflineHub", image, "Offline Knowledge Hub", menu)
+    return icon, quit_app
 
 
 def main():
@@ -131,13 +132,33 @@ def main():
     port = config.get("portal_port", 8000)
     server = make_server("0.0.0.0", port, app, threaded=True)
 
+    tray, quit_app = _build_tray(config, server, app.config["HOTSPOT_MGR"], app.config["REGISTRY"])
+
+    from flask import abort, request
+
+    @app.route("/_internal/quit", methods=["POST"])
+    def _internal_quit():
+        # Loopback-only. Lets the uninstaller (uninstall_stop_hotspot.ps1)
+        # ask the app to shut down the same way the tray's own Quit menu
+        # item does, instead of going straight to taskkill /F. This matters
+        # because pystray only deletes its own notification-area icon
+        # (Shell_NotifyIcon NIM_DELETE) inside that graceful path - a forced
+        # kill skips it entirely and leaves a stale, unresponsive tray icon
+        # behind until the next Explorer restart. Confirmed live: this is
+        # exactly what was happening on every non-graceful exit. Registered
+        # before the server thread starts, so there's no route ever added
+        # while a request could already be in flight.
+        if request.remote_addr not in ("127.0.0.1", "::1"):
+            abort(403)
+        threading.Thread(target=quit_app, args=(tray,), daemon=True).start()
+        return ("", 204)
+
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
 
     landing = "/admin/setup" if config.get("first_run", True) else "/"
     webbrowser.open(f"http://127.0.0.1:{port}{landing}")
 
-    tray = _build_tray(config, server, app.config["HOTSPOT_MGR"], app.config["REGISTRY"])
     tray.run()  # blocks until Quit is chosen; server_thread is a daemon so process exits with it
 
 

@@ -9,6 +9,25 @@
 # killing OfflineHub.exe during uninstall is not enough on its own.
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Ask the running app to quit gracefully first, the same way its own tray
+# "Quit" menu item does. This gives pystray a chance to delete its own
+# notification-area icon before the process dies. installer.iss's taskkill
+# /F step further below does not give it that chance, and was confirmed
+# live to leave a stale, unresponsive tray icon behind whenever it ran
+# without this step first. Best-effort: if the app already isn't running,
+# or config.json is missing, this just does nothing and the taskkill step
+# still cleans up the process itself.
+try {
+    $configPath = Join-Path $PSScriptRoot 'config.json'
+    $port = 8000
+    if (Test-Path $configPath) {
+        $cfg = Get-Content $configPath -Raw | ConvertFrom-Json
+        if ($cfg.portal_port) { $port = $cfg.portal_port }
+    }
+    Invoke-WebRequest -Uri "http://127.0.0.1:$port/_internal/quit" -Method Post -TimeoutSec 2 -UseBasicParsing | Out-Null
+    Start-Sleep -Milliseconds 1500
+} catch {}
+
 try {
     Add-Type -AssemblyName System.Runtime.WindowsRuntime
     [void][Windows.Networking.Connectivity.NetworkInformation,Windows.Networking.Connectivity,ContentType=WindowsRuntime]

@@ -60,14 +60,18 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""O
 Filename: "{app}\OfflineHub.exe"; Description: "{cm:LaunchProgram,Offline Knowledge Hub}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; The app has no console and no signal handler, so there's no graceful "please
-; quit" short of hitting its own tray menu. The uninstaller can't do that.
-; Windows Mobile Hotspot is also a system-managed service, not tied to the
-; app process's lifetime (confirmed directly: starting tethering then killing
-; the controlling process leaves it broadcasting indefinitely). So stopping
-; the hotspot and killing the process are two separate necessary steps, in
-; that order. Killing the process first would leave an orphaned hotspot with
-; nothing left to stop it.
+; uninstall_stop_hotspot.ps1 first asks the running app to quit gracefully
+; over its own loopback-only /_internal/quit route (same effect as its tray
+; "Quit" menu item), then stops the hotspot, before this taskkill runs.
+; Windows Mobile Hotspot is a system-managed service, not tied to the app
+; process's lifetime (confirmed directly: starting tethering then killing
+; the controlling process leaves it broadcasting indefinitely) - so stopping
+; the hotspot has to happen regardless of whether the graceful quit worked.
+; taskkill here is now just the fallback for whatever the graceful quit
+; missed (app already crashed, port unreachable, etc.), not the primary way
+; the process stops. Killing the process before stopping the hotspot would
+; leave an orphaned hotspot with nothing left to stop it, so order matters
+; even in the fallback case.
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\uninstall_stop_hotspot.ps1"""; Flags: runhidden waituntilterminated; RunOnceId: "StopHotspot"
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM OfflineHub.exe /T"; Flags: runhidden waituntilterminated; RunOnceId: "StopMainExe"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Offline Knowledge Hub"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveFirewallRule"

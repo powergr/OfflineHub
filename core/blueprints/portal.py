@@ -70,6 +70,19 @@ def api_modules():
                 except ValueError:
                     pass
 
+            # Without this, the frontend's vector source has no maxzoom of
+            # its own and MapLibre assumes tiles exist all the way to z22 -
+            # confirmed live to matter: zooming in past a map's real max
+            # zoom requested tiles that don't exist, got 404s, and rendered
+            # nothing there instead of MapLibre's normal behavior of
+            # upscaling the deepest tile it actually has. A real gap opening
+            # up in the middle of an otherwise-fine map (not just at the
+            # edges) is what that looks like to a student.
+            try:
+                entry["maxzoom"] = int(meta.get("maxzoom", 0)) or None
+            except (TypeError, ValueError):
+                pass
+
             # The .mbtiles file's own metadata table always carries a real
             # "format" ("pbf" for vector, "png"/"jpg"/"webp" for raster) per
             # the MBTiles spec - trust that over the manifest's stored value

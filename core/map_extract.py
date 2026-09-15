@@ -55,18 +55,29 @@ _BUILD_URL_CACHE_TTL = 3600  # seconds
 _build_url_cache: str | None = None
 _build_url_cache_at: float = 0.0
 
-DEFAULT_MAX_ZOOM = 12
-# Confirmed live, not guessed: a real end-to-end extraction of Luxembourg
-# (139 tiles, zoom 12) through the actual admin route completed in ~10s,
+# 15 is the live Protomaps daily build's own actual maximum zoom (confirmed
+# via its header, not assumed) - raised from an earlier 12 after a real
+# admin report: a country extracted at z12 opened real gaps once zoomed
+# past that level (see the frontend maxzoom fix in templates/portal/
+# index.html), and separately z12 is too shallow for this app's own road-
+# label and POI layers, which don't start rendering until z13/z15 - a
+# capital city extracted at the old ceiling could never show a single POI
+# regardless of the gap issue, since minzoom: 13/15 on those layers simply
+# excluded them entirely at z12.
+DEFAULT_MAX_ZOOM = 15
+# Confirmed live: a real end-to-end extraction of Luxembourg (139 tiles at
+# the old z12 ceiling) through the actual admin route completed in ~10s,
 # but a real France extraction (a far larger, less spatially-compact bbox)
 # took much longer than that throughput would predict - directory-node
 # cache reuse (see _HttpRangeSource) is far less effective across a big,
-# spread-out area than a small one. Kept deliberately conservative as a
-# result: most compact/small countries (roughly 100 of the 173 in the
-# bundled list) still get full zoom-12 detail under this budget; larger
-# ones auto-reduce via pick_maxzoom() instead of risking a wait measured
-# in tens of minutes.
-DEFAULT_TILE_BUDGET = 15_000
+# spread-out area than a small one. Raising the ceiling to 15 multiplies
+# tile counts roughly 4x per extra zoom level (confirmed via the exact
+# tile-count math, not estimated), so this budget is sized to let small/
+# city-state-sized countries (Cyprus, Luxembourg, and a handful more) reach
+# the new full z15 ceiling, while larger countries auto-reduce via
+# pick_maxzoom() the same way they did before, just from a higher starting
+# point.
+DEFAULT_TILE_BUDGET = 20_000
 
 # Deliberately approximate - see module docstring. Real bytes/tile varies
 # 2.9-42x across the existing curated packs depending on how much of a

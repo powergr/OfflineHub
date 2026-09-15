@@ -30,7 +30,7 @@ else:
 _TEMPLATE_DIR = os.path.join(_APP_ROOT, "templates")
 _ASSETS_DIR = os.path.join(_APP_ROOT, "assets", "portal")
 
-_SETUP_OPEN_PREFIXES = ("/admin/setup", "/admin/downloads", "/admin/login", "/static")
+_SETUP_OPEN_PREFIXES = ("/admin/setup", "/admin/downloads", "/admin/login", "/static", "/_internal")
 
 
 def create_app(config: dict, save_config) -> Flask:

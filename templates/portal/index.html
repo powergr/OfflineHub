@@ -176,7 +176,8 @@
           // mod.bounds is always a plain array of 4 numbers (or absent) from
           // /api/modules - safe to inline as a bare JS literal, no quoting.
           const boundsArg = Array.isArray(mod.bounds) ? JSON.stringify(mod.bounds) : "null";
-          return `<button class="open-btn" onclick="openMap('${id}', '${safeName}', '${mod.format}', ${boundsArg})">${T_OPEN_MAP} ↗</button>`;
+          const maxzoomArg = Number.isFinite(mod.maxzoom) ? mod.maxzoom : "null";
+          return `<button class="open-btn" onclick="openMap('${id}', '${safeName}', '${mod.format}', ${boundsArg}, ${maxzoomArg})">${T_OPEN_MAP} ↗</button>`;
         }
         if (mod.type === "llm") {
           return `<a class="open-btn" href="/chat/${encodeURIComponent(id)}">${T_CHAT} ↗</a>`;
@@ -217,7 +218,7 @@
         });
       }
 
-      function openMap(moduleId, moduleName, format, bounds) {
+      function openMap(moduleId, moduleName, format, bounds, maxzoom) {
         $("map-title").innerText = moduleName;
         $("map-overlay").style.display = "flex";
         if (currentMap) currentMap.remove();
@@ -279,7 +280,20 @@
             // JS/CSS - MapLibre fills in {fontstack}/{range} itself, only ${baseUrl}
             // is a real JS interpolation here.
             glyphs: `${baseUrl}/static/vendor/fonts/{fontstack}/{range}.pbf`,
-            sources: { "offline-vector": { type: "vector", tiles: [`${baseUrl}/tiles/${safeId}/{z}/{x}/{y}.pbf`] } },
+            // maxzoom tells MapLibre exactly how deep this module's real data
+            // goes, so zooming in further reuses (upscales) the deepest tile
+            // it has instead of requesting tiles that don't exist - without
+            // it MapLibre assumes data exists all the way to z22, those
+            // requests 404, and the result is a real blank gap right where a
+            // student zoomed in to see street/POI detail, not just a coarser
+            // view. Falls back to 15 (the live Protomaps build's own actual
+            // maximum, confirmed via its header) for modules installed
+            // before /api/modules started reporting a real per-module value.
+            sources: { "offline-vector": {
+              type: "vector",
+              tiles: [`${baseUrl}/tiles/${safeId}/{z}/{x}/{y}.pbf`],
+              maxzoom: Number.isFinite(maxzoom) ? maxzoom : 15,
+            } },
             // Every source-layer/kind value below was confirmed by decoding real
             // tiles from the live Protomaps build (mapbox_vector_tile against
             // several real cities/regions), not guessed - vector_layers is
@@ -457,7 +471,12 @@
         } else {
           styleObj = {
             version: 8,
-            sources: { "offline-raster": { type: "raster", tiles: [`${baseUrl}/tiles/${safeId}/{z}/{x}/{y}.png`], tileSize: 256 } },
+            sources: { "offline-raster": {
+              type: "raster",
+              tiles: [`${baseUrl}/tiles/${safeId}/{z}/{x}/{y}.png`],
+              tileSize: 256,
+              maxzoom: Number.isFinite(maxzoom) ? maxzoom : 15,
+            } },
             layers: [{ id: "raster-layer", type: "raster", source: "offline-raster" }],
           };
         }
