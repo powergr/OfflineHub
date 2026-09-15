@@ -179,4 +179,56 @@ from memory or an old list.
     minutes, though the reasoning and the auto-reduction behavior still
     hold) - worth knowing if this ever needs recalibrating again.
 
+26. ✅ **Quit could hang indefinitely, and an uninstall that caught the
+    app mid-hang could delete modules unevenly instead of honoring "keep
+    modules."** Done. Found from two real admin reports in the same
+    session: the tray icon stopped responding to clicks, and afterward an
+    uninstall that was supposed to keep all installed content only kept
+    the map modules; every ZIM and the LLM model were gone.
+
+    Root-caused from the app's own log file, not guessed. It showed
+    "Quit requested" firing four separate times over 4.5 minutes while
+    the process kept serving requests in between - proof the shutdown
+    path can start but never actually finish, for a reason still not
+    fully pinned down (pystray's win32 message loop is the leading
+    suspect). Whatever the exact cause, a process that never exits after
+    "Quit" is exactly what a stuck tray icon looks like.
+
+    That explains the uneven module loss too: `core/tileserver.py`'s
+    `TileServer` caches one open sqlite connection per `.mbtiles` module
+    for the life of the process, and `close_all()` existed but was never
+    called from anywhere, confirmed by grepping the whole codebase for
+    it. So a hung-but-still-alive process kept every map's `.mbtiles`
+    file locked open indefinitely, while ZIM/LLM modules' handles get
+    closed fine by `registry.unload_all()`. If the app was still alive
+    (however that happens) when an uninstall ran, Windows would refuse to
+    delete whatever `.mbtiles` files were still locked while deleting
+    everything else normally - the opposite of "keep," and just as wrong
+    if the admin had chosen to delete everything instead.
+
+    Fixed both causes in `main.py`'s `quit_app()`: it now calls the
+    previously-dead `tile_server.close_all()`, and a 25-second watchdog
+    thread force-exits the process (`os._exit`) if normal shutdown hasn't
+    already finished by then, so "Quit" is now guaranteed to actually end
+    the process within a bounded time no matter what hangs underneath.
+    `uninstall_stop_hotspot.ps1` already asks the app to quit gracefully
+    over a loopback-only `/_internal/quit` route before the uninstaller's
+    `taskkill /F` fallback runs (added earlier the same session for a
+    separate stale-icon report); it now polls for the process to actually
+    be gone for up to 28 seconds instead of a fixed 1.5-second sleep, to
+    match the watchdog's worst case.
+
+    Verified live end-to-end, not just read through: installed a real
+    `.mbtiles` module, hit `/api/modules` to force `TileServer` to open
+    and cache its connection (confirmed via the response actually
+    containing the module's real data), called `/_internal/quit`, and
+    confirmed both that the process exited immediately (not via the 25s
+    watchdog) and that the `.mbtiles` file could be renamed right
+    afterward - proof it was no longer locked. Full 151-test suite still
+    passes.
+
+    The admin's actual missing wikipedia/wiktionary/vikidia/phet/LLM
+    modules from this incident are gone from disk and were not
+    recoverable - they need to be redownloaded from the Modules page.
+
 ---

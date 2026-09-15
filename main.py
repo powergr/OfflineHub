@@ -11,6 +11,7 @@ import logging
 import os
 import sys
 import threading
+import time
 import webbrowser
 
 from core.logging_setup import setup_logging
@@ -67,7 +68,10 @@ def _icon_path() -> str:
     return os.path.join(root, "assets", "icons", "hub.ico")
 
 
-def _build_tray(config: dict, server, hotspot_mgr, registry):
+_QUIT_WATCHDOG_SECONDS = 25
+
+
+def _build_tray(config: dict, server, hotspot_mgr, registry, tile_server):
     import pystray
     from PIL import Image
 
@@ -80,13 +84,50 @@ def _build_tray(config: dict, server, hotspot_mgr, registry):
     def open_admin(icon, item):
         webbrowser.open(base_url + "/admin")
 
+    def _force_exit_watchdog():
+        # Guarantees the process actually dies within a bounded time no
+        # matter what hangs below - confirmed live to matter. A real run's
+        # own log showed "Quit requested" fire four separate times over
+        # 4.5 minutes while the process kept serving requests in between,
+        # meaning something in the shutdown path can silently never
+        # complete (exact cause unconfirmed - pystray's win32 message loop
+        # is the leading suspect, but not proven). Whatever the cause, a
+        # process that never actually exits after "Quit" is exactly what
+        # a stuck, unresponsive tray icon looks like to a user, and it
+        # also means an uninstall run against it later can hit files this
+        # process still has open. This thread is the backstop: if normal
+        # shutdown hasn't already ended the process by itself, force it.
+        time.sleep(_QUIT_WATCHDOG_SECONDS)
+        logger.warning(
+            "Quit did not complete within %ss - forcing process exit",
+            _QUIT_WATCHDOG_SECONDS,
+        )
+        os._exit(1)
+
     def quit_app(icon, item=None):
         logger.info("Quit requested")
+        threading.Thread(target=_force_exit_watchdog, daemon=True).start()
         icon.stop()
         try:
             registry.unload_all()
         except Exception:
             logger.exception("Error unloading modules on quit")
+        try:
+            # Not covered by registry.unload_all(): mbtiles modules are
+            # registered with no handle (TileServer holds their sqlite
+            # connections itself, cached per module for the life of the
+            # process - see core/tileserver.py). Confirmed live to matter:
+            # this call was missing entirely, so every installed map's
+            # .mbtiles file stayed open and locked for as long as the
+            # process ran, "Quit" included. A later uninstall run that
+            # caught this process still alive (see the watchdog above)
+            # could then fail to delete exactly those files while
+            # everything else it wasn't holding open got removed fine -
+            # confirmed against a real report of only map modules
+            # surviving an uninstall that was supposed to keep everything.
+            tile_server.close_all()
+        except Exception:
+            logger.exception("Error closing tile connections on quit")
         try:
             hotspot_mgr.stop()
         except Exception:
@@ -132,7 +173,9 @@ def main():
     port = config.get("portal_port", 8000)
     server = make_server("0.0.0.0", port, app, threaded=True)
 
-    tray, quit_app = _build_tray(config, server, app.config["HOTSPOT_MGR"], app.config["REGISTRY"])
+    tray, quit_app = _build_tray(
+        config, server, app.config["HOTSPOT_MGR"], app.config["REGISTRY"], app.config["TILE_SERVER"]
+    )
 
     from flask import abort, request
 
