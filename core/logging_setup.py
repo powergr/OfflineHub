@@ -1,5 +1,5 @@
 """
-logging_setup — one rotating log file under C:\\OfflineHub\\logs\\.
+logging_setup: one rotating log file under C:\\OfflineHub\\logs\\.
 
 Today's build (--windows-console-mode=disable, see build.bat) has no
 console window at all once launched from the Start Menu or autostart, so a

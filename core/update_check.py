@@ -1,5 +1,5 @@
 """
-update_check — compares the running VERSION against the latest GitHub
+update_check: compares the running VERSION against the latest GitHub
 release tag (see .github/workflows/release.yml, which tags releases
 "vX.Y.Z"). No auto-download, no auto-install - just a "a newer version
 exists, here's the link" signal for the admin Settings page, since nothing

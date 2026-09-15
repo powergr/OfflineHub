@@ -1,5 +1,5 @@
 """
-version — single source of truth for the app version.
+version: single source of truth for the app version.
 
 Reads the VERSION file at the app root (bundled next to OfflineHub.exe in
 frozen builds via build.bat's --include-data-files) so build.bat,

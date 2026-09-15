@@ -1,5 +1,5 @@
 """
-Offline Knowledge Hub — Entry Point.
+Offline Knowledge Hub: Entry Point.
 
 No customtkinter, no GUI event loop. Boots one Flask app (student portal +
 admin UI, see core/app_factory.py) and runs it with a system tray icon as
@@ -31,6 +31,7 @@ DEFAULT_CONFIG = {
     "admin_password_hash": "",
     "admin_password_salt": "",
     "secret_key": "",
+    "language": "en",
     "hotspot": {
         "ssid": "OfflineHub",
         "password": "offlinehub2026",

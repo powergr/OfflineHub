@@ -1,5 +1,5 @@
 """
-LLMEngine — small offline chat model via onnxruntime-genai. No vendor binary:
+LLMEngine: small offline chat model via onnxruntime-genai. No vendor binary.
 onnxruntime-genai ships real Windows wheels on PyPI, and model weights are
 downloaded content (like a ZIM file), not a separate executable.
 
@@ -17,6 +17,7 @@ real model (Qwen2.5-0.5B-Instruct, genai int4 build):
 import json
 import os
 import threading
+import time
 from typing import Iterator
 
 # Import order matters here, confirmed by an actual frozen-build crash:
@@ -63,6 +64,39 @@ DEFAULT_MAX_TOKENS = 4096
 _FALLBACK_CONTEXT_LENGTH = 4096
 
 
+class _TicketQueue:
+    """
+    FIFO ticket queue: replaces a plain threading.Lock for serializing CPU
+    inference, since a Lock gives mutual exclusion but no visibility into
+    how many requests are ahead of you - a second student used to just see
+    nothing happen while generate_stream() blocked silently inside
+    `with self._lock:`. A caller takes a ticket, polls its own position
+    (0 = its turn) until it reaches 0, generates, then calls done() to let
+    the next ticket proceed. Only the ticket equal to `_serving` may ever
+    have position 0, so exclusivity is exactly as strict as a Lock's.
+    """
+
+    def __init__(self):
+        self._state_lock = threading.Lock()
+        self._next_ticket = 0
+        self._serving = 0
+
+    def take_ticket(self) -> int:
+        with self._state_lock:
+            ticket = self._next_ticket
+            self._next_ticket += 1
+            return ticket
+
+    def position(self, ticket: int) -> int:
+        """0 means it's this ticket's turn; N>0 means N requests are ahead of it."""
+        with self._state_lock:
+            return ticket - self._serving
+
+    def done(self):
+        with self._state_lock:
+            self._serving += 1
+
+
 class LLMEngine:
 
     def __init__(self, model_dir: str):
@@ -70,7 +104,7 @@ class LLMEngine:
         self._model = None
         self._tokenizer = None
         self._context_length = _FALLBACK_CONTEXT_LENGTH
-        self._lock = threading.Lock()
+        self._queue = _TicketQueue()
 
     def load(self):
         if self._model is not None:
@@ -93,11 +127,16 @@ class LLMEngine:
 
     def generate_stream(self, prompt: str, history: list[dict] | None = None,
                          system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-                         max_tokens: int = DEFAULT_MAX_TOKENS) -> Iterator[str]:
+                         max_tokens: int = DEFAULT_MAX_TOKENS,
+                         context: list[dict] | None = None) -> Iterator[str]:
         """
-        Yields decoded text chunks as they're produced. Holds the engine's
-        lock for the whole generation — CPU inference is serialized one
-        request at a time rather than contending for CPU across students.
+        Yields decoded text chunks as they're produced. CPU inference is
+        serialized one request at a time via a FIFO ticket queue (not a
+        plain lock) rather than contending for CPU across students - while
+        waiting for its turn, yields "[queue] N" chunks (same "special
+        marker inside the normal text channel" convention the caller
+        already uses for "[error] ..." - see core/blueprints/portal.py) so
+        the chat UI can show "N people ahead of you" instead of nothing.
 
         `history` is prior turns in this conversation - a list of
         {"role": "user"/"assistant", "content": str} dicts, oldest first,
@@ -105,12 +144,28 @@ class LLMEngine:
         to start a brand new conversation with no memory of what was asked
         before, confirmed by reading the old code: it only ever built
         [system_prompt, current prompt], nothing else.
+
+        `context` is retrieval-augmented excerpts from installed ZIM
+        content (see core/retrieval.py) - [{"module_name", "title",
+        "snippet"}, ...], best passage matches first. Folded into the
+        system prompt rather than the conversation itself, with explicit
+        instructions to use them when relevant and ignore them otherwise,
+        so a casual "hi" doesn't get derailed by an unrelated excerpt just
+        because retrieval always runs.
         """
         self.load()
-        with self._lock:
+        ticket = self._queue.take_ticket()
+        try:
+            while True:
+                position = self._queue.position(ticket)
+                if position <= 0:
+                    break
+                yield f"[queue] {position}"
+                time.sleep(1)
+
             effective_max_tokens = min(max_tokens, max(self._context_length // 4, 256))
             input_tokens = self._build_input_tokens(
-                system_prompt, history or [], prompt, effective_max_tokens
+                system_prompt, history or [], prompt, effective_max_tokens, context or []
             )
 
             params = og.GeneratorParams(self._model)
@@ -126,25 +181,36 @@ class LLMEngine:
                 generator.generate_next_token()
                 token = generator.get_next_tokens()[0]
                 yield stream.decode(token)
+        finally:
+            self._queue.done()
 
     def _build_input_tokens(self, system_prompt: str, history: list[dict],
-                             prompt: str, effective_max_tokens: int):
+                             prompt: str, effective_max_tokens: int,
+                             context: list[dict] | None = None):
         """
-        Drops the oldest history turns, one at a time, until system +
-        history + prompt fits under this model's own context window with
-        room left for the reply (effective_max_tokens) plus a safety
-        margin for the chat template's own special tokens. Capped by
-        token count, not turn count, so a long session degrades by losing
-        its earliest turns instead of ever hard-erroring on overflow.
+        Drops retrieved context excerpts first (weakest-match last, so
+        pop() removes the least relevant one), then the oldest history
+        turns one at a time, until system + context + history + prompt
+        fits under this model's own context window with room left for the
+        reply (effective_max_tokens) plus a safety margin for the chat
+        template's own special tokens. Context goes before history because
+        a retrieved excerpt is only ever a "might help" supplement, while
+        conversation history is what the student is actually relying on
+        for continuity - losing the encyclopedia excerpt is a smaller
+        quality hit than the model forgetting what was just discussed.
+        Capped by token count, not turn/item count, so a long session or a
+        big excerpt degrades gracefully instead of ever hard-erroring.
         """
         budget = self._context_length - effective_max_tokens - 256
-        trimmed = list(history)
+        trimmed_history = list(history)
+        trimmed_context = list(context or [])
 
         while True:
+            full_system_prompt = self._build_system_prompt(system_prompt, trimmed_context)
             messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.extend(trimmed)
+            if full_system_prompt:
+                messages.append({"role": "system", "content": full_system_prompt})
+            messages.extend(trimmed_history)
             messages.append({"role": "user", "content": prompt})
 
             chat_prompt = self._tokenizer.apply_chat_template(
@@ -152,9 +218,31 @@ class LLMEngine:
             )
             input_tokens = self._tokenizer.encode(chat_prompt)
 
-            if len(input_tokens) <= budget or not trimmed:
+            if len(input_tokens) <= budget:
                 return input_tokens
-            trimmed = trimmed[1:]
+            if trimmed_context:
+                trimmed_context.pop()
+            elif trimmed_history:
+                trimmed_history = trimmed_history[1:]
+            else:
+                return input_tokens
+
+    @staticmethod
+    def _build_system_prompt(base_system_prompt: str, context: list[dict]) -> str:
+        if not context:
+            return base_system_prompt
+        parts = [
+            base_system_prompt,
+            "",
+            "You have access to the following excerpts from the offline "
+            "encyclopedia installed on this computer. If an excerpt helps "
+            "answer the student's question, use it and mention which "
+            "source it's from. If none of them are relevant to the "
+            "question, ignore them completely and answer normally.",
+        ]
+        for item in context:
+            parts.append(f'\n[From {item["module_name"]}: "{item["title"]}"]\n{item["snippet"]}')
+        return "\n".join(parts)
 
     def unload(self):
         self._model = None

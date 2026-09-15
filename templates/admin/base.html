@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ current_lang }}">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{% block title %}Admin{% endblock %} — Offline Hub</title>
+    <title>{% block title %}{{ t('common.admin') }}{% endblock %} - {{ t('app.brand_short') }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
     <style>
       .shell { display: flex; min-height: 100vh; }
@@ -67,26 +67,26 @@
     {% if request.endpoint not in ('admin.login', 'admin.setup') and session.get('admin_authed') %}
     <div class="shell">
       <nav>
-        <div class="brand">🏫 Offline Hub</div>
-        <a href="{{ url_for('admin.modules') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.modules' }}"><span class="ic">📦</span> Modules</a>
-        <a href="{{ url_for('admin.hotspot') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.hotspot' }}"><span class="ic">📡</span> Hotspot</a>
-        <a href="{{ url_for('admin.services') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.services' }}"><span class="ic">🛠</span> Services</a>
-        <a href="{{ url_for('admin.help_page') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.help_page' }}"><span class="ic">❓</span> Help</a>
-        <a href="{{ url_for('admin.settings') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.settings' }}"><span class="ic">⚙️</span> Settings</a>
+        <div class="brand">🏫 {{ t('app.brand_short') }}</div>
+        <a href="{{ url_for('admin.modules') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.modules' }}"><span class="ic">📦</span> {{ t('nav.modules') }}</a>
+        <a href="{{ url_for('admin.hotspot') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.hotspot' }}"><span class="ic">📡</span> {{ t('nav.hotspot') }}</a>
+        <a href="{{ url_for('admin.services') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.services' }}"><span class="ic">🛠</span> {{ t('nav.services') }}</a>
+        <a href="{{ url_for('admin.help_page') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.help_page' }}"><span class="ic">❓</span> {{ t('nav.help') }}</a>
+        <a href="{{ url_for('admin.settings') }}" class="nav-link {{ 'active' if request.endpoint == 'admin.settings' }}"><span class="ic">⚙️</span> {{ t('nav.settings') }}</a>
         <div class="spacer"></div>
         <div class="nav-divider"></div>
-        <a href="/" target="_blank" class="nav-link"><span class="ic">🌐</span> View Portal</a>
-        <a href="{{ url_for('admin.logout') }}" class="nav-link"><span class="ic">🚪</span> Logout</a>
+        <a href="/" target="_blank" class="nav-link"><span class="ic">🌐</span> {{ t('nav.view_portal') }}</a>
+        <a href="{{ url_for('admin.logout') }}" class="nav-link"><span class="ic">🚪</span> {{ t('nav.logout') }}</a>
         <div class="nav-foot">
-          <span class="muted">Offline Hub</span>
+          <span class="muted">{{ t('app.brand_short') }}</span>
           <span class="version-badge">v{{ app_version }}</span>
         </div>
       </nav>
       <main>
         <div class="page">
           <div id="update-banner" hidden style="background: var(--surface3); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 16px; margin-bottom: 18px; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
-            <span>🔔 A newer version (<strong id="update-version"></strong>) is available.</span>
-            <a id="update-link" href="#" target="_blank" class="btn secondary" style="width: auto;">View Release</a>
+            <span>🔔 {{ t('update.banner_text', version='<strong id="update-version"></strong>') | safe }}</span>
+            <a id="update-link" href="#" target="_blank" class="btn secondary" style="width: auto;">{{ t('update.view_release') }}</a>
           </div>
           {% include "admin/_flashes.html" %}
           {% block content %}{% endblock %}

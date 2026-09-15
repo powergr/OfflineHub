@@ -8,10 +8,12 @@ separately, by hand, against Phi-3-mini (see plan.md / session notes).
 
 import json
 import os
+import threading
+import time
 
 import pytest
 
-from core.llm_engine import LLMEngine, _FALLBACK_CONTEXT_LENGTH
+from core.llm_engine import LLMEngine, _FALLBACK_CONTEXT_LENGTH, _TicketQueue
 
 
 class FakeTokenizer:
@@ -26,6 +28,14 @@ class FakeTokenizer:
 
     def encode(self, text):
         return list(text)  # length == len(text), content unused
+
+    def create_stream(self):
+        return _FakeTokenizerStream()
+
+
+class _FakeTokenizerStream:
+    def decode(self, token):
+        return token  # fake tokens are already plain strings
 
 
 @pytest.fixture
@@ -86,6 +96,93 @@ def test_no_history_matches_old_behavior():
     assert "".join(tokens) == "syshello"
 
 
+# ── retrieval-augmented context (plan.md Phase 4, item 14) ──────────────────
+
+def test_no_context_matches_plain_behavior():
+    """context=[] or context=None must render byte-identical to omitting
+    it entirely - callers that never pass context (or a chat with nothing
+    installed to retrieve from) must see zero behavior change."""
+    e = LLMEngine(model_dir="unused")
+    e._tokenizer = FakeTokenizer()
+    e._context_length = 1000
+
+    tokens_no_context = e._build_input_tokens("sys", [], "hello", effective_max_tokens=10)
+    tokens_empty_context = e._build_input_tokens("sys", [], "hello", effective_max_tokens=10, context=[])
+    assert "".join(tokens_no_context) == "".join(tokens_empty_context) == "syshello"
+
+
+def test_context_snippet_is_included_in_the_system_prompt():
+    e = LLMEngine(model_dir="unused")
+    e._tokenizer = FakeTokenizer()
+    e._context_length = 1000
+
+    context = [{"module_name": "Wikipedia", "title": "Photosynthesis", "snippet": "PLANTS_MAKE_FOOD"}]
+    tokens = e._build_input_tokens("sys", [], "how do plants eat", effective_max_tokens=10, context=context)
+    text = "".join(tokens)
+
+    assert "PLANTS_MAKE_FOOD" in text
+    assert "Photosynthesis" in text
+    assert "Wikipedia" in text
+    assert "sys" in text  # base system prompt is still present, not replaced
+
+
+def test_context_is_dropped_before_history_when_over_budget():
+    """Retrieved context is a "might help" supplement; real conversation
+    history is what the student is actually relying on. When both can't
+    fit, the excerpt must go first.
+
+    Budget math (FakeTokenizer = 1 char/token, verified against the real
+    _build_system_prompt output rather than guessed): with the huge
+    snippet the full system+history+prompt is 427 chars; without context
+    it's 25. context_length=361 with effective_max_tokens=5 gives a
+    budget of 100 - well inside that gap, so this only passes if context
+    actually gets dropped first."""
+    e = LLMEngine(model_dir="unused")
+    e._tokenizer = FakeTokenizer()
+    e._context_length = 361
+
+    history = [{"role": "user", "content": "HISTORY_MARKER"}]
+    context = [{"module_name": "M", "title": "T", "snippet": "S" * 100}]  # huge - won't fit
+    tokens = e._build_input_tokens("sys", history, "question", effective_max_tokens=5, context=context)
+    text = "".join(tokens)
+
+    assert "HISTORY_MARKER" in text  # history survives
+    assert "S" * 100 not in text     # oversized context excerpt was dropped
+    assert "question" in text        # current prompt always survives
+
+
+def test_multiple_context_items_dropped_least_relevant_first():
+    """retrieve() returns best matches first, so when trimming is needed
+    the LAST (weakest-match) item must go before the first (strongest).
+
+    Budget math: both items together = 560 chars; the first item alone =
+    319. context_length=661 with effective_max_tokens=5 gives a budget of
+    400 - inside that gap, so the worst item must be dropped to fit."""
+    e = LLMEngine(model_dir="unused")
+    e._tokenizer = FakeTokenizer()
+    e._context_length = 661
+
+    context = [
+        {"module_name": "M", "title": "Best", "snippet": "BEST_MATCH"},
+        {"module_name": "M", "title": "Worst", "snippet": "WORST_MATCH" * 20},  # forces trimming
+    ]
+    tokens = e._build_input_tokens("sys", [], "q", effective_max_tokens=5, context=context)
+    text = "".join(tokens)
+
+    assert "BEST_MATCH" in text
+    assert "WORST_MATCH" not in text
+
+
+def test_build_system_prompt_returns_base_unchanged_when_no_context():
+    assert LLMEngine._build_system_prompt("base prompt", []) == "base prompt"
+
+
+def test_build_system_prompt_instructs_model_to_ignore_irrelevant_excerpts():
+    result = LLMEngine._build_system_prompt("base", [{"module_name": "M", "title": "T", "snippet": "S"}])
+    assert "ignore" in result.lower()
+    assert "base" in result
+
+
 def test_read_context_length_from_real_genai_config(tmp_path):
     (tmp_path / "genai_config.json").write_text(json.dumps({"model": {"context_length": 4096}}))
     e = LLMEngine(model_dir=str(tmp_path))
@@ -101,3 +198,175 @@ def test_read_context_length_falls_back_on_malformed_json(tmp_path):
     (tmp_path / "genai_config.json").write_text("{not valid json")
     e = LLMEngine(model_dir=str(tmp_path))
     assert e._read_context_length() == _FALLBACK_CONTEXT_LENGTH
+
+
+# ── _TicketQueue (chat queue-position feedback) ──────────────────────────────
+
+def test_first_ticket_has_position_zero():
+    q = _TicketQueue()
+    ticket = q.take_ticket()
+    assert q.position(ticket) == 0
+
+
+def test_second_ticket_has_position_one_ahead():
+    q = _TicketQueue()
+    first = q.take_ticket()
+    second = q.take_ticket()
+    assert q.position(first) == 0
+    assert q.position(second) == 1
+
+
+def test_done_advances_the_queue():
+    q = _TicketQueue()
+    first = q.take_ticket()
+    second = q.take_ticket()
+    third = q.take_ticket()
+    assert (q.position(first), q.position(second), q.position(third)) == (0, 1, 2)
+
+    q.done()  # first ticket finishes
+    assert (q.position(second), q.position(third)) == (0, 1)
+
+    q.done()  # second ticket finishes
+    assert q.position(third) == 0
+
+
+def test_tickets_are_served_in_real_first_come_first_served_order():
+    """Drives the queue with real threads (not just sequential calls) to
+    confirm tickets are actually served in arrival order under real
+    concurrency, not just when called one at a time from a single thread -
+    this is the exact scenario multiple students hitting /api/chat at once
+    produces."""
+    q = _TicketQueue()
+    order_taken = []
+    order_served = []
+    lock = threading.Lock()
+    start = threading.Event()
+
+    def worker(i):
+        start.wait()
+        ticket = q.take_ticket()
+        with lock:
+            order_taken.append((ticket, i))
+        while q.position(ticket) > 0:
+            time.sleep(0.01)
+        with lock:
+            order_served.append(ticket)
+        time.sleep(0.02)  # simulate doing work while holding its turn
+        q.done()
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(6)]
+    for t in threads:
+        t.start()
+    start.set()
+    for t in threads:
+        t.join(timeout=5)
+
+    expected_order = sorted(t for t, _ in order_taken)
+    assert order_served == expected_order  # served strictly in ticket order
+    assert len(set(order_served)) == 6  # every ticket served exactly once
+
+
+def test_position_reflects_tickets_ahead_not_total_tickets_taken():
+    """A ticket's position must only count OTHER unfinished tickets ahead of
+    it, not shrink/grow from unrelated later arrivals behind it."""
+    q = _TicketQueue()
+    first = q.take_ticket()
+    second = q.take_ticket()
+    assert q.position(second) == 1
+    q.take_ticket()  # a third ticket arrives behind - must not affect second's position
+    assert q.position(second) == 1
+
+
+# ── generate_stream() end-to-end with a fake onnxruntime-genai layer ────────
+# Exercises the ACTUAL generate_stream() method (not just _TicketQueue in
+# isolation) under real thread concurrency, without needing a real multi-GB
+# model - fakes stand in for og.Model/og.GeneratorParams/og.Generator only;
+# the queueing, serialization, and chunk-yielding logic is all real.
+
+class _FakeGenerator:
+    def __init__(self, tokens):
+        self._tokens = list(tokens)
+        self._i = 0
+
+    def append_tokens(self, tokens):
+        pass
+
+    def is_done(self):
+        return self._i >= len(self._tokens)
+
+    def generate_next_token(self):
+        pass
+
+    def get_next_tokens(self):
+        tok = self._tokens[self._i]
+        self._i += 1
+        return [tok]
+
+
+class _FakeGeneratorParams:
+    def __init__(self, model):
+        pass
+
+    def set_search_options(self, **kwargs):
+        pass
+
+
+class _FakeOG:
+    """Stands in for the `og` module (onnxruntime_genai) - each fake
+    Generator yields the SAME fixed token list regardless of the real
+    prompt, since these tests only care about ordering/queueing, not
+    actual generated content."""
+
+    def __init__(self, tokens_per_call):
+        self._tokens_per_call = tokens_per_call
+
+    def GeneratorParams(self, model):
+        return _FakeGeneratorParams(model)
+
+    def Generator(self, model, params):
+        return _FakeGenerator(self._tokens_per_call)
+
+
+def test_generate_stream_serializes_concurrent_callers_and_reports_queue_position(monkeypatch):
+    """Two real threads call generate_stream() on the SAME engine at once.
+    The second caller must see a "[queue] 1" chunk before any of its own
+    generated tokens, and - the actual point of keeping this serialized at
+    all - the two callers' real generated tokens must never interleave."""
+    import core.llm_engine as llm_engine_module
+
+    fake_og = _FakeOG(tokens_per_call=["A", "B", "C"])
+    monkeypatch.setattr(llm_engine_module, "og", fake_og)
+
+    e = LLMEngine(model_dir="unused")
+    e._tokenizer = FakeTokenizer()
+    e._context_length = 100_000
+    e._model = object()  # load() is a no-op once _model is already set
+
+    results = {}
+    start_second = threading.Event()
+
+    def first_caller():
+        chunks = []
+        for chunk in e.generate_stream("hello"):
+            chunks.append(chunk)
+            if chunk == "A":
+                start_second.set()  # let the second caller take its ticket mid-generation
+                time.sleep(0.05)    # hold the "turn" a bit so overlap would be visible if buggy
+        results["first"] = chunks
+
+    def second_caller():
+        start_second.wait(timeout=5)
+        results["second"] = list(e.generate_stream("hi again"))
+
+    t1 = threading.Thread(target=first_caller)
+    t2 = threading.Thread(target=second_caller)
+    t1.start()
+    t2.start()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert results["first"] == ["A", "B", "C"]
+    # the second caller must have been told it was queued behind one other
+    # request, and only see its own real tokens after that
+    assert results["second"][0] == "[queue] 1"
+    assert results["second"][1:] == ["A", "B", "C"]

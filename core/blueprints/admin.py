@@ -1,5 +1,5 @@
 """
-admin blueprint — password-gated web UI. Replaces both the old tkinter
+admin blueprint: password-gated web UI. Replaces both the old tkinter
 first-run wizard and the tkinter admin panel with browser pages served from
 the same Flask process as the public portal.
 
@@ -7,8 +7,8 @@ Setup and the ongoing "Modules" page share the exact same download
 endpoints below (download_quickstart / download_search / download_custom).
 Each POST request binds its own key/item/url as local variables scoped to
 that single request+thread, which is what makes this safe for concurrent
-downloads — unlike the old tkinter wizard, where several download threads
-closed over one shared `for` loop's variables and clobbered each other.
+downloads. That's unlike the old tkinter wizard, where several download
+threads closed over one shared `for` loop's variables and clobbered each other.
 """
 
 import json
@@ -27,6 +27,7 @@ from core.downloader import (
     CATALOGUE, LLM_CATALOGUE, MAPS_CATALOGUE, STARTER_BUNDLE_KEYS, CatalogueError,
     llm_download_plan, resolve_catalogue_entry, search_catalogue,
 )
+from core.i18n import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, translate
 from core.module_manager import MODULES_DIR
 from core.version import get_version
 from core import hotspot as hotspot_module
@@ -76,6 +77,17 @@ def _hotspot_mgr():
     return current_app.config["HOTSPOT_MGR"]
 
 
+def _usage():
+    return current_app.config["USAGE"]
+
+
+def _t(key: str, **kwargs) -> str:
+    """Python-side counterpart to the Jinja `t()` context-processor helper
+    (core/app_factory.py) - for flash()/jsonify() messages built in route
+    code, which never go through template rendering at all."""
+    return translate(key, _cfg().get("language", DEFAULT_LANGUAGE), **kwargs)
+
+
 # ── Session gate ──────────────────────────────────────────────────────────────
 
 @bp.before_request
@@ -97,7 +109,7 @@ def _gate():
 
 @bp.route("/")
 def index():
-    """Bare '/admin' has no page of its own — send visitors to whatever the
+    """Bare '/admin' has no page of its own. Send visitors to whatever the
     _gate() before_request would otherwise land them on (setup/login/modules)."""
     return redirect(url_for("admin.modules"))
 
@@ -109,8 +121,7 @@ def login():
     if request.method == "POST":
         ip = request.remote_addr or "unknown"
         if _is_locked_out(ip):
-            return render_template("admin/login.html",
-                                    error="Too many attempts. Try again in a few minutes.")
+            return render_template("admin/login.html", error=_t("login.too_many_attempts"))
         password = request.form.get("password", "")
         cfg = _cfg()
         if verify_password(password, cfg.get("admin_password_hash", ""), cfg.get("admin_password_salt", "")):
@@ -119,7 +130,7 @@ def login():
             session.permanent = True
             return redirect(url_for("admin.modules"))
         _record_failure(ip)
-        return render_template("admin/login.html", error="Incorrect password.")
+        return render_template("admin/login.html", error=_t("login.incorrect_password"))
     return render_template("admin/login.html", error=None)
 
 
@@ -177,10 +188,10 @@ def setup_finish():
     p1 = request.form.get("admin_password", "")
     p2 = request.form.get("admin_password_confirm", "")
     if len(p1) < 6:
-        flash("Admin password must be at least 6 characters.", "error")
+        flash(_t("flash.password_too_short"), "error")
         return redirect(url_for("admin.setup"))
     if p1 != p2:
-        flash("Passwords do not match.", "error")
+        flash(_t("flash.passwords_dont_match"), "error")
         return redirect(url_for("admin.setup"))
     cfg["admin_password_salt"] = generate_salt()
     cfg["admin_password_hash"] = hash_password(p1, cfg["admin_password_salt"])
@@ -188,7 +199,7 @@ def setup_finish():
     cfg["first_run"] = False
     _save_cfg(cfg)
     session["admin_authed"] = True
-    flash("Setup complete.", "success")
+    flash(_t("flash.setup_complete"), "success")
     return redirect(url_for("admin.modules"))
 
 
@@ -217,7 +228,39 @@ def modules():
         bundle_remaining=bundle_remaining,
         bundle_total=len(STARTER_BUNDLE_KEYS),
         bundle_size=sum(quickstart.get(k, {}).get("size", 0) or 0 for k in bundle_remaining),
+        content_updates=_stale_content_keys(installed, quickstart),
+        usage_counts=_usage().get_counts(),
     )
+
+
+def _stale_content_keys(installed, quickstart) -> set[str]:
+    """
+    Which installed modules have a newer snapshot available at their
+    original source, compared against the manifest's own recorded
+    "source_url" (see ModuleManager.install_from_download) - a ZIM's
+    filename encodes its build date, so a changed URL means Kiwix has
+    since published a newer one. Manual/zip installs have no "source_url"
+    at all (nothing to compare against) and are silently skipped, not
+    flagged. ZIM comparisons only count when `quickstart[folder]["live"]`
+    is True - a failed live lookup falling back to the last-known-good
+    static URL must never be mistaken for "content is stale," since that
+    static URL can differ from what's installed for reasons having nothing
+    to do with a real newer release existing.
+    """
+    stale = set()
+    for folder, data, _status in installed:
+        source_url = data.get("source_url")
+        if not source_url:
+            continue
+        if data.get("type") == "zim":
+            entry = quickstart.get(folder)
+            if entry and entry.get("live") and entry.get("url") and entry["url"] != source_url:
+                stale.add(folder)
+        elif data.get("type") == "mbtiles":
+            entry = MAPS_CATALOGUE.get(folder)
+            if entry and entry.get("url") and entry["url"] != source_url:
+                stale.add(folder)
+    return stale
 
 
 @bp.route("/modules/install", methods=["POST"])
@@ -232,16 +275,16 @@ def modules_install():
             upload.save(target)
         elif filepath:
             if not os.path.isfile(filepath):
-                raise FileNotFoundError(f"File not found: {filepath}")
+                raise FileNotFoundError(_t("flash.file_not_found", path=filepath))
             target = filepath
         else:
-            raise ValueError("Provide a file path or choose a file to upload.")
+            raise ValueError(_t("flash.provide_file_or_upload"))
 
         if target.lower().endswith(".zip"):
             module_mgr.install_from_zip(target)
         else:
             module_mgr.install_from_raw_file(target)
-        flash("Module installed.", "success")
+        flash(_t("flash.module_installed"), "success")
     except Exception as e:
         flash(str(e), "error")
     return redirect(url_for("admin.modules"))
@@ -253,7 +296,8 @@ def modules_remove():
     path = os.path.join(MODULES_DIR, folder)
     if os.path.isdir(path):
         _module_mgr().remove(path)
-        flash(f"Removed '{folder}'.", "success")
+        _usage().forget(folder)
+        flash(_t("flash.removed", name=folder), "success")
     return redirect(url_for("admin.modules"))
 
 
@@ -263,13 +307,15 @@ def modules_remove():
 def download_quickstart():
     key = request.form.get("key") or (request.get_json(silent=True) or {}).get("key")
     if key not in CATALOGUE:
-        return jsonify({"error": "Unknown catalogue key."}), 404
+        return jsonify({"error": _t("flash.unknown_catalogue_key")}), 404
     if _is_installed(key):
-        return jsonify({"error": f"'{key}' is already installed."}), 409
+        return jsonify({"error": _t("flash.already_installed", name=key)}), 409
 
     item = dict(CATALOGUE[key])
     try:
-        live = resolve_catalogue_entry(item["opds_name"], item.get("opds_flavour"))
+        live = resolve_catalogue_entry(
+            item["opds_name"], item.get("opds_flavour"), lang=item.get("lang", "eng")
+        )
     except CatalogueError as e:
         return jsonify({"error": str(e)}), 502
 
@@ -304,15 +350,17 @@ def download_bundle():
     """
     keys = [k for k in STARTER_BUNDLE_KEYS if not _is_installed(k)]
     if not keys:
-        return jsonify({"error": "Starter bundle is already installed."}), 409
+        return jsonify({"error": _t("flash.bundle_already_installed")}), 409
 
     resolved = []
     for key in keys:
         item = dict(CATALOGUE[key])
         try:
-            live = resolve_catalogue_entry(item["opds_name"], item.get("opds_flavour"))
+            live = resolve_catalogue_entry(
+                item["opds_name"], item.get("opds_flavour"), lang=item.get("lang", "eng")
+            )
         except CatalogueError as e:
-            return jsonify({"error": f"Could not resolve '{item['name']}': {e}"}), 502
+            return jsonify({"error": _t("flash.could_not_resolve", name=item["name"], error=str(e))}), 502
         item["url"] = live["url"]
         resolved.append((key, item))
 
@@ -322,6 +370,11 @@ def download_bundle():
     job_id = jobs.new_job()
     module_mgr = _module_mgr()
     downloader = _downloader()
+    # Captured here, in the request's own Flask app context, and passed
+    # into the background thread as a plain value - current_app (which
+    # _t() reads) isn't available once this request finishes, and the
+    # thread easily outlives it (a bundle download can run for minutes).
+    lang = _cfg().get("language", DEFAULT_LANGUAGE)
 
     def run():
         total = len(resolved)
@@ -340,7 +393,8 @@ def download_bundle():
             downloader.download(item["url"], dest, progress_cb, done_cb)
 
             if not outcome.get("success"):
-                jobs.done_cb(job_id)(False, "", outcome.get("error") or f"Failed to download '{item['name']}'.")
+                fallback = translate("flash.failed_to_download", lang, name=item["name"])
+                jobs.done_cb(job_id)(False, "", outcome.get("error") or fallback)
                 return
             try:
                 module_mgr.install_from_download(key, item, dest)
@@ -352,6 +406,63 @@ def download_bundle():
 
     threading.Thread(target=run, daemon=True).start()
     return jsonify({"job_id": job_id, "count": len(keys)})
+
+
+@bp.route("/downloads/update", methods=["POST"])
+def download_update():
+    """
+    Re-downloads an already-installed CATALOGUE/MAPS_CATALOGUE module from
+    its current source and replaces the install in place - the "fetch it"
+    half of content-refresh visibility (_stale_content_keys() in modules()
+    is the "know a newer version exists" half). Only meaningful for modules
+    that were themselves installed from one of those catalogues in the
+    first place (manual/zip installs have no catalogue entry to re-fetch
+    from), enforced by requiring the manifest's own type to match a real
+    catalogue lookup rather than trusting the client-supplied key alone.
+    """
+    key = request.form.get("key") or (request.get_json(silent=True) or {}).get("key")
+    manifest = _module_mgr().get_manifest(key) if key else None
+    if manifest is None:
+        return jsonify({"error": _t("flash.unknown_module")}), 404
+
+    mod_type = manifest.get("type")
+    from core.downloader import DOWNLOAD_DIR
+    module_mgr = _module_mgr()
+
+    if mod_type == "zim":
+        if key not in CATALOGUE:
+            return jsonify({"error": _t("flash.no_quickstart_entry", key=key)}), 400
+        item = dict(CATALOGUE[key])
+        try:
+            live = resolve_catalogue_entry(
+                item["opds_name"], item.get("opds_flavour"), lang=item.get("lang", "eng")
+            )
+        except CatalogueError as e:
+            return jsonify({"error": str(e)}), 502
+        item["url"] = live["url"]
+        dest = os.path.join(DOWNLOAD_DIR, f"{key}.zim")
+        install_fn = module_mgr.install_from_download
+    elif mod_type == "mbtiles":
+        if key not in MAPS_CATALOGUE:
+            return jsonify({"error": _t("flash.no_maps_entry", key=key)}), 400
+        item = dict(MAPS_CATALOGUE[key])
+        dest = os.path.join(DOWNLOAD_DIR, f"{key}.mbtiles")
+        install_fn = module_mgr.install_map_from_download
+    else:
+        return jsonify({"error": _t("flash.cant_update_type", type=mod_type)}), 400
+
+    jobs = _jobs()
+    job_id = jobs.new_job()
+
+    def on_success(path):
+        install_fn(key, item, path, replace=True)
+
+    threading.Thread(
+        target=_downloader().download,
+        args=(item["url"], dest, jobs.progress_cb(job_id), jobs.done_cb(job_id, on_success)),
+        daemon=True,
+    ).start()
+    return jsonify({"job_id": job_id})
 
 
 @bp.route("/downloads/search", methods=["POST"])
@@ -370,14 +481,14 @@ def download_search():
 @bp.route("/downloads/custom", methods=["POST"])
 def download_custom():
     body = request.get_json(force=True, silent=True) or {}
-    name = (body.get("name") or "Custom Content").strip()
+    name = (body.get("name") or _t("flash.custom_content_default")).strip()
     url = body.get("url")
     if not url:
-        return jsonify({"error": "Missing url."}), 400
+        return jsonify({"error": _t("flash.missing_url")}), 400
 
     key = _slugify(name)
     if _is_installed(key):
-        return jsonify({"error": f"'{name}' is already installed."}), 409
+        return jsonify({"error": _t("flash.already_installed", name=name)}), 409
 
     from core.downloader import DOWNLOAD_DIR
     dest = os.path.join(DOWNLOAD_DIR, f"{key}.zim")
@@ -402,9 +513,9 @@ def download_custom():
 def download_llm():
     key = request.form.get("key") or (request.get_json(silent=True) or {}).get("key")
     if key not in LLM_CATALOGUE:
-        return jsonify({"error": "Unknown LLM catalogue key."}), 404
+        return jsonify({"error": _t("flash.unknown_llm_key")}), 404
     if _is_installed(key):
-        return jsonify({"error": f"'{key}' is already installed."}), 409
+        return jsonify({"error": _t("flash.already_installed", name=key)}), 409
 
     item = dict(LLM_CATALOGUE[key])
     files, dest_dir = llm_download_plan(key)
@@ -428,9 +539,9 @@ def download_llm():
 def download_map():
     key = request.form.get("key") or (request.get_json(silent=True) or {}).get("key")
     if key not in MAPS_CATALOGUE:
-        return jsonify({"error": "Unknown map catalogue key."}), 404
+        return jsonify({"error": _t("flash.unknown_map_key")}), 404
     if _is_installed(key):
-        return jsonify({"error": f"'{key}' is already installed."}), 409
+        return jsonify({"error": _t("flash.already_installed", name=key)}), 409
 
     item = dict(MAPS_CATALOGUE[key])
     from core.downloader import DOWNLOAD_DIR
@@ -451,11 +562,85 @@ def download_map():
     return jsonify({"job_id": job_id})
 
 
+@bp.route("/downloads/countries")
+def download_countries():
+    """
+    The bundled country list (core/data/country_bboxes.json) plus each
+    entry's computed maxzoom/tile_count/estimated size - all pure math, no
+    network I/O, so this is cheap on every call and needs no caching of its
+    own. The frontend fetches this once and filters it client-side (the
+    whole list is ~20KB), unlike the ZIM "Discover" search which hits a
+    live API per query.
+    """
+    from core.map_extract import estimate_size_mb, load_countries, pick_maxzoom
+
+    installed = {folder for folder, _ in _module_mgr().list_modules()}
+    countries = []
+    for iso, (name, bbox) in load_countries().items():
+        maxzoom, tile_count = pick_maxzoom(bbox)
+        countries.append({
+            "iso": iso,
+            "name": name,
+            "maxzoom": maxzoom,
+            "tile_count": tile_count,
+            "est_size_mb": round(estimate_size_mb(tile_count)),
+            "installed": f"country_{iso.lower()}" in installed,
+        })
+    return jsonify({"countries": countries})
+
+
+@bp.route("/downloads/map_country", methods=["POST"])
+def download_map_country():
+    """
+    Self-serve country map download: extracts the requested country's
+    tiles live from Protomaps' daily build (core/map_extract.py) straight
+    into a local .mbtiles file, in a background thread reporting progress
+    through the same JobTracker/pollJob() pattern every other download in
+    this file already uses - see download_quickstart above for the
+    reference shape this follows.
+    """
+    from core.map_extract import extract_country, load_countries
+
+    iso = request.form.get("iso") or (request.get_json(silent=True) or {}).get("iso")
+    countries = load_countries()
+    if iso not in countries:
+        return jsonify({"error": _t("flash.unknown_country")}), 404
+    key = f"country_{iso.lower()}"
+    if _is_installed(key):
+        return jsonify({"error": _t("flash.already_installed", name=key)}), 409
+
+    name, _bbox = countries[iso]
+    from core.downloader import DOWNLOAD_DIR
+    dest = os.path.join(DOWNLOAD_DIR, f"{key}.mbtiles")
+
+    jobs = _jobs()
+    job_id = jobs.new_job()
+    module_mgr = _module_mgr()
+
+    def on_success(path):
+        module_mgr.install_extracted_map(iso, name, path)
+
+    # extract_country() doesn't share Downloader.download()'s (url, dest,
+    # progress_cb, done_cb) signature - it returns a result dict on success
+    # instead of calling a done_cb - so it's wrapped here rather than
+    # passed straight to Thread like the other download routes.
+    def run():
+        try:
+            extract_country(iso, dest, jobs.progress_cb(job_id))
+        except Exception as e:
+            jobs.done_cb(job_id)(False, "", str(e))
+            return
+        jobs.done_cb(job_id, on_success)(True, dest)
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+
 @bp.route("/downloads/<job_id>/status")
 def download_status(job_id):
     job = _jobs().get(job_id)
     if job is None:
-        return jsonify({"error": "Unknown job."}), 404
+        return jsonify({"error": _t("flash.unknown_job")}), 404
     return jsonify(job)
 
 
@@ -468,7 +653,7 @@ def hotspot():
         cfg["hotspot"]["ssid"] = request.form.get("ssid", "")
         cfg["hotspot"]["password"] = request.form.get("password", "")
         _save_cfg(cfg)
-        flash("Hotspot settings saved.", "success")
+        flash(_t("flash.hotspot_saved"), "success")
         return redirect(url_for("admin.hotspot"))
 
     mgr = _hotspot_mgr()
@@ -517,7 +702,7 @@ def services():
 def services_unload():
     folder = request.form.get("folder", "")
     _registry().unload(folder)
-    flash(f"Unloaded '{folder}'.", "success")
+    flash(_t("flash.unloaded", name=folder), "success")
     return redirect(url_for("admin.services"))
 
 
@@ -537,27 +722,31 @@ def settings():
         try:
             cfg["portal_port"] = int(request.form.get("portal_port", 8000))
         except ValueError:
-            flash("Port must be a number.", "error")
+            flash(_t("flash.port_not_a_number"), "error")
             return redirect(url_for("admin.settings"))
 
         cfg["autostart"] = "autostart" in request.form
         if cfg["autostart"]:
             _register_autostart()
 
+        language = request.form.get("language")
+        if language in SUPPORTED_LANGUAGES:
+            cfg["language"] = language
+
         p1 = request.form.get("new_password", "")
         p2 = request.form.get("confirm_password", "")
         if p1 or p2:
             if p1 != p2:
-                flash("Passwords do not match.", "error")
+                flash(_t("flash.passwords_dont_match"), "error")
                 return redirect(url_for("admin.settings"))
             if len(p1) < 6:
-                flash("Password must be at least 6 characters.", "error")
+                flash(_t("flash.password_too_short"), "error")
                 return redirect(url_for("admin.settings"))
             cfg["admin_password_salt"] = generate_salt()
             cfg["admin_password_hash"] = hash_password(p1, cfg["admin_password_salt"])
 
         _save_cfg(cfg)
-        flash("Settings saved.", "success")
+        flash(_t("flash.settings_saved"), "success")
         return redirect(url_for("admin.settings"))
 
     return render_template("admin/settings.html", config=cfg)
@@ -638,7 +827,7 @@ def _register_autostart():
         winreg.SetValueEx(key, "OfflineHub", 0, winreg.REG_SZ, sys.executable)
         winreg.CloseKey(key)
     except Exception as e:
-        flash(f"Could not register autostart: {e}", "error")
+        flash(_t("flash.autostart_failed", error=str(e)), "error")
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────

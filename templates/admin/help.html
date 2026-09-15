@@ -1,100 +1,63 @@
 {% extends "admin/base.html" %}
-{% block title %}Help{% endblock %}
+{% block title %}{{ t('nav.help') }}{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
-    <h1>❓ Help &amp; Troubleshooting</h1>
-    <p class="sub">Plain-language answers for the questions that come up most when running this on-site.</p>
+    <h1>❓ {{ t('help.heading') }}</h1>
+    <p class="sub">{{ t('help.subtitle') }}</p>
   </div>
 </div>
 
-<div class="section-title" style="margin-top:0">The Basics</div>
+<div class="section-title" style="margin-top:0">{{ t('help.section_basics') }}</div>
 <div class="card help-card">
-  <p><strong>What is a "module"?</strong></p>
+  <p><strong>{{ t('help.what_is_module_q') }}</strong></p>
   <p class="muted">
-    A module is one piece of content: Wikipedia, a map, the offline chat
-    assistant. Each one is a self-contained folder under
-    <code>C:\OfflineHub\modules\</code> — installing one downloads it and
-    adds it to the student portal automatically; removing one (from the
-    <a href="{{ url_for('admin.modules') }}">Modules</a> page) deletes just
-    that folder and nothing else. There's no limit on how many you install
-    beyond your PC's disk space.
+    {{ t('help.what_is_module_a', modules_link='<a href="' + url_for('admin.modules') + '">' + t('nav.modules') + '</a>') | safe }}
   </p>
 </div>
 <div class="card help-card">
-  <p><strong>What does "hotspot" actually mean here?</strong></p>
+  <p><strong>{{ t('help.what_is_hotspot_q') }}</strong></p>
   <p class="muted">
-    Turning on the hotspot makes this PC act like a Wi-Fi router: student
-    phones/laptops/tablets connect to the network name (SSID) and password
-    you set on the <a href="{{ url_for('admin.hotspot') }}">Hotspot</a> page,
-    the same way they'd join any other Wi-Fi. No school router, internet
-    connection, or extra hardware is involved — once connected, opening any
-    browser and going to this PC's address (shown on the Hotspot page) reaches
-    the portal. Students never need their own internet access.
+    {{ t('help.what_is_hotspot_a', hotspot_link='<a href="' + url_for('admin.hotspot') + '">' + t('nav.hotspot') + '</a>') | safe }}
   </p>
 </div>
 
-<div class="section-title">If the Hotspot Won't Start</div>
+<div class="section-title">{{ t('help.section_hotspot_wont_start') }}</div>
 <div class="card help-card">
-  <p><strong>"Administrator rights are required"</strong></p>
+  <p><strong>{{ t('help.admin_rights_q') }}</strong></p>
   <p class="muted">
-    Windows only allows starting a Wi-Fi hotspot from an elevated process.
-    Close the app, then right-click <code>OfflineHub.exe</code> (or its
-    shortcut) and choose <strong>"Run as administrator"</strong>, and try
-    again from the Hotspot page.
+    {{ t('help.admin_rights_a') | safe }}
   </p>
 </div>
 <div class="card help-card">
-  <p><strong>It fails immediately, or mentions "NO_INTERNET"</strong></p>
+  <p><strong>{{ t('help.no_internet_q') }}</strong></p>
   <p class="muted">
-    This is the single most confusing part of running an "offline" app:
-    Windows' built-in Mobile Hotspot needs this PC to already have <em>some</em>
-    active network connection (Wi-Fi or Ethernet, even one with no real
-    internet behind it) to share <em>from</em> — it's a Windows requirement,
-    not something OfflineHub controls. Connect this PC to any network once
-    (even a phone's hotspot works), then try starting the hotspot again.
-    Students still won't need that connection once the hotspot is running.
+    {{ t('help.no_internet_a') | safe }}
   </p>
 </div>
 <div class="card help-card">
-  <p><strong>It fails with a netsh / "hosted network" error</strong></p>
+  <p><strong>{{ t('help.netsh_error_q') }}</strong></p>
   <p class="muted">
-    Some Wi-Fi adapter drivers don't support the older "hosted network"
-    method at all — this is a driver limitation, not something adjustable
-    in software. Open a Command Prompt and run
-    <code>netsh wlan show drivers</code>; if "Hosted network supported"
-    says <strong>No</strong>, the modern Mobile Hotspot path (see above) is
-    the only one that will work on this hardware.
+    {{ t('help.netsh_error_a') | safe }}
   </p>
 </div>
 
-<div class="section-title">If a Download Fails</div>
+<div class="section-title">{{ t('help.section_download_fails') }}</div>
 <div class="card help-card">
   <p class="muted">
-    A failed download shows a plain-English reason (not enough disk space,
-    a network error, a corrupted file) and turns the button into
-    <strong>Retry</strong> — click it to try again; downloads resume from
-    where they left off rather than starting over. If it keeps failing:
+    {{ t('help.download_fails_intro') | safe }}
   </p>
   <ul class="muted" style="margin: 8px 0 0 18px; line-height: 1.8;">
-    <li>Check this PC has enough free disk space (large items like maps and
-        the offline assistant need several GB).</li>
-    <li>Check this PC's own internet connection — only needed while
-        downloading, never for students afterward.</li>
-    <li>Try again later — the content is served by Kiwix's free public
-        library, which occasionally has its own outages.</li>
+    <li>{{ t('help.download_fails_disk_space') }}</li>
+    <li>{{ t('help.download_fails_connection') }}</li>
+    <li>{{ t('help.download_fails_retry_later') }}</li>
   </ul>
 </div>
 
-<div class="section-title">Something Else</div>
+<div class="section-title">{{ t('help.section_something_else') }}</div>
 <div class="card help-card">
   <p class="muted">
-    The <a href="{{ url_for('admin.settings') }}">Settings</a> page has an
-    <strong>Export Diagnostics</strong> button — it zips up the log file,
-    your settings (with passwords removed), and the list of installed
-    modules into one file you can email to whoever's helping you. Logs also
-    live directly at <code>C:\OfflineHub\logs\offlinehub.log</code> if you
-    want to look yourself.
+    {{ t('help.something_else_body', settings_link='<a href="' + url_for('admin.settings') + '">' + t('nav.settings') + '</a>') | safe }}
   </p>
 </div>
 

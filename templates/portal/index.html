@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ current_lang }}">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Offline Knowledge Hub</title>
+    <title>{{ t('app.brand_full') }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
     <style>
       :root { --card-w: 320px; }
@@ -115,35 +115,43 @@
 
   <body>
     <header>
-      <p class="eyebrow">🏫 Offline Knowledge Hub</p>
-      <h1>Everything you need,<br />no internet required.</h1>
-      <p class="subtitle">Connect to the network, open this page, and explore.</p>
+      <p class="eyebrow">🏫 {{ t('app.brand_full') }}</p>
+      <h1>{{ t('portal.hero_title') | safe }}</h1>
+      <p class="subtitle">{{ t('portal.hero_subtitle') }}</p>
     </header>
 
     <div id="status-bar">
-      <div class="status-chip"><span class="dot dot-green"></span>Hub online</div>
-      <div class="status-chip" id="ip-chip"><span class="dot dot-yellow"></span>Loading IP…</div>
-      <div class="status-chip"><a href="/admin">⚙️ Admin</a></div>
+      <div class="status-chip"><span class="dot dot-green"></span>{{ t('portal.hub_online') }}</div>
+      <div class="status-chip" id="ip-chip"><span class="dot dot-yellow"></span>{{ t('portal.loading_ip') }}</div>
+      <div class="status-chip"><a href="/admin">⚙️ {{ t('common.admin') }}</a></div>
       <span class="version-badge">v{{ app_version }}</span>
     </div>
 
     <main id="cards-container">
-      <p style="color: var(--muted); grid-column: 1/-1">Loading modules…</p>
+      <p style="color: var(--muted); grid-column: 1/-1">{{ t('portal.loading_modules') }}</p>
     </main>
 
     <footer>
-      Offline Knowledge Hub &nbsp;·&nbsp; Running locally &nbsp;·&nbsp; No data leaves this network.
+      {{ t('app.brand_full') }} &nbsp;·&nbsp; {{ t('portal.running_locally') }} &nbsp;·&nbsp; {{ t('portal.no_data_leaves') }}
     </footer>
 
     <div id="map-overlay">
       <div id="map-header">
-        <h3 id="map-title" style="color: white; margin: 0">Map</h3>
-        <button id="close-map-btn" onclick="closeMap()">Close Map ✖</button>
+        <h3 id="map-title" style="color: white; margin: 0">{{ t('portal.map_default_title') }}</h3>
+        <button id="close-map-btn" onclick="closeMap()">{{ t('portal.close_map') }} ✖</button>
       </div>
       <div id="map-container"></div>
     </div>
 
     <script>
+      const T_UNAVAILABLE = {{ t('portal.unavailable') | tojson }};
+      const T_OPEN_MAP = {{ t('portal.open_map') | tojson }};
+      const T_CHAT = {{ t('common.chat') | tojson }};
+      const T_OPEN = {{ t('common.open') | tojson }};
+      const T_NO_MODULES = {{ t('portal.no_modules', admin_link='<a href="/admin" style="color:inherit">' + t('common.admin_panel') + '</a>') | tojson }};
+      const T_ERROR = {{ t('common.error') | tojson }};
+      const T_READY = {{ t('common.ready') | tojson }};
+
       const $ = (id) => document.getElementById(id);
       let currentMap = null;
 
@@ -162,18 +170,18 @@
       }
 
       function actionFor(id, mod) {
-        if (mod.status === "error") return `<button class="open-btn" disabled>Unavailable</button>`;
+        if (mod.status === "error") return `<button class="open-btn" disabled>${T_UNAVAILABLE}</button>`;
         if (mod.type === "mbtiles") {
           const safeName = (mod.name || "").replace(/'/g, "\\'");
           // mod.bounds is always a plain array of 4 numbers (or absent) from
           // /api/modules - safe to inline as a bare JS literal, no quoting.
           const boundsArg = Array.isArray(mod.bounds) ? JSON.stringify(mod.bounds) : "null";
-          return `<button class="open-btn" onclick="openMap('${id}', '${safeName}', '${mod.format}', ${boundsArg})">Open Map ↗</button>`;
+          return `<button class="open-btn" onclick="openMap('${id}', '${safeName}', '${mod.format}', ${boundsArg})">${T_OPEN_MAP} ↗</button>`;
         }
         if (mod.type === "llm") {
-          return `<a class="open-btn" href="/chat/${encodeURIComponent(id)}">Chat ↗</a>`;
+          return `<a class="open-btn" href="/chat/${encodeURIComponent(id)}">${T_CHAT} ↗</a>`;
         }
-        return `<a class="open-btn" href="/content/${encodeURIComponent(id)}/" target="_blank">Open ↗</a>`;
+        return `<a class="open-btn" href="/content/${encodeURIComponent(id)}/" target="_blank">${T_OPEN} ↗</a>`;
       }
 
       async function buildCards() {
@@ -183,7 +191,7 @@
 
         const entries = Object.entries(modules);
         if (entries.length === 0) {
-          container.innerHTML = `<p style="color: var(--muted); grid-column:1/-1">No modules installed yet. Add them via the <a href="/admin" style="color:inherit">Admin Panel</a>.</p>`;
+          container.innerHTML = `<p style="color: var(--muted); grid-column:1/-1">${T_NO_MODULES}</p>`;
           return;
         }
 
@@ -200,7 +208,7 @@
             <p class="card-desc">${mod.description || ""}</p>
             <div class="card-meta">
               <span class="badge ${mod.status === "error" ? "badge-error" : "badge-ready"}">
-                ${mod.status === "error" ? "● Error" : "● Ready"}
+                ${mod.status === "error" ? "● " + T_ERROR : "● " + T_READY}
               </span>
               ${actionFor(id, mod)}
             </div>`;
@@ -213,6 +221,9 @@
         $("map-title").innerText = moduleName;
         $("map-overlay").style.display = "flex";
         if (currentMap) currentMap.remove();
+        // Fire-and-forget - aggregate "was this opened" usage count, the
+        // only signal maps have no server page load to record it from.
+        fetch(`/api/track-open/${encodeURIComponent(moduleId)}`, { method: "POST" }).catch(() => {});
 
         // Fall back to a wide world view only for older modules added
         // manually before /api/modules started reporting real mbtiles
@@ -226,6 +237,42 @@
 
         let styleObj;
         if (format === "vector" || format === "pbf") {
+          // Shared between the "roads" and "roads-tunnel" layers below - split
+          // into two layers (rather than one layer with a data-driven
+          // line-dasharray) because MapLibre's style spec only allows
+          // line-dasharray to vary by zoom, not by feature property; confirmed
+          // live via a real "data expressions not supported" console error
+          // when it was first tried as a single case() expression.
+          const ROAD_LINE_COLOR = [
+            "match", ["get", "kind_detail"],
+            ["motorway", "motorway_link"], "#f2a65a",
+            ["trunk", "trunk_link"], "#f5b878",
+            ["primary", "primary_link"], "#ffffff",
+            ["secondary", "secondary_link"], "#ffffff",
+            ["tertiary", "tertiary_link"], "#ffffff",
+            ["residential", "unclassified", "living_street"], "#fbfaf7",
+            ["service"], "#f0ede6",
+            ["pedestrian", "footway", "cycleway", "path", "steps", "track"], "#c9c3b6",
+            ["rail"], "#a8a49b",
+            "#ffffff",
+          ];
+          const ROAD_LINE_WIDTH = [
+            "interpolate", ["linear"], ["zoom"],
+            8, ["match", ["get", "kind_detail"], ["motorway", "motorway_link", "trunk", "trunk_link"], 1.4, 0.3],
+            13, ["match", ["get", "kind_detail"],
+                  ["motorway", "motorway_link", "trunk", "trunk_link"], 3.2,
+                  ["primary", "primary_link", "secondary", "secondary_link"], 2,
+                  ["tertiary", "tertiary_link", "residential", "unclassified", "living_street"], 1.3,
+                  ["pedestrian", "footway", "cycleway", "path", "steps", "track", "rail"], 0.9,
+                  0.6],
+            17, ["match", ["get", "kind_detail"],
+                  ["motorway", "motorway_link", "trunk", "trunk_link"], 9,
+                  ["primary", "primary_link", "secondary", "secondary_link"], 6,
+                  ["tertiary", "tertiary_link", "residential", "unclassified", "living_street"], 4,
+                  ["pedestrian", "footway", "cycleway", "path", "steps", "track", "rail"], 2.5,
+                  1.5],
+          ];
+
           styleObj = {
             version: 8,
             // Vendored locally (assets/portal/vendor/fonts/) same as MapLibre's own
@@ -233,34 +280,155 @@
             // is a real JS interpolation here.
             glyphs: `${baseUrl}/static/vendor/fonts/{fontstack}/{range}.pbf`,
             sources: { "offline-vector": { type: "vector", tiles: [`${baseUrl}/tiles/${safeId}/{z}/{x}/{y}.pbf`] } },
+            // Every source-layer/kind value below was confirmed by decoding real
+            // tiles from the live Protomaps build (mapbox_vector_tile against
+            // several real cities/regions), not guessed - vector_layers is
+            // earth/water/landcover/landuse/roads/buildings/boundaries/places/pois.
+            // Two source-layer names from an earlier pass ("transportation" and
+            // singular "building"/"boundary") never actually existed in this
+            // schema and silently drew nothing; removed rather than kept as dead
+            // weight. landcover exists in the schema but was empty in every real
+            // tile sampled (city and rural alike), so it's left minimal here.
             layers: [
               { id: "bg", type: "background", paint: { "background-color": "#f2efe9" } },
-              { id: "water-omt", type: "fill", source: "offline-vector", "source-layer": "water", paint: { "fill-color": "#a0c8f0" } },
-              { id: "roads-omt", type: "line", source: "offline-vector", "source-layer": "transportation", paint: { "line-color": "#ffffff", "line-width": 1.5 } },
-              { id: "building-omt", type: "fill", source: "offline-vector", "source-layer": "building", paint: { "fill-color": "#d9d6ce" } },
-              { id: "landcover-omt", type: "fill", source: "offline-vector", "source-layer": "landcover", paint: { "fill-color": "#d0e3c8" } },
-              { id: "landuse-omt", type: "fill", source: "offline-vector", "source-layer": "landuse", paint: { "fill-color": "#e6e2d8" } },
-              { id: "boundary-omt", type: "line", source: "offline-vector", "source-layer": "boundary", paint: { "line-color": "#ffaa00", "line-width": 2 } },
-              { id: "earth-tz", type: "fill", source: "offline-vector", "source-layer": "earth", paint: { "fill-color": "#e0e4e8" } },
-              // Protomaps' "roads" layer carries a "kind" field (highway/major_road/
-              // minor_road/path/...) - confirmed by decoding a real tile, since a flat
-              // 1.5px white line was nearly invisible against the light background.
-              { id: "roads-tz", type: "line", source: "offline-vector", "source-layer": "roads",
+              // landuse carries both human land use (residential/commercial/
+              // school/pedestrian - 380 pedestrian-kind features alone in one
+              // dense Paris tile) and natural terrain (forest/farmland/wetland/
+              // bare_rock) in a single layer - grouped into a handful of colors
+              // instead of one flat beige so parks, campuses, and plazas actually
+              // read differently from each other.
+              { id: "landuse", type: "fill", source: "offline-vector", "source-layer": "landuse",
                 paint: {
-                  "line-color": ["match", ["get", "kind"], "highway", "#f2a65a", "major_road", "#ffffff", "minor_road", "#fbfaf7", "#ffffff"],
-                  "line-width": ["match", ["get", "kind"], "highway", 2.2, "major_road", 1.4, "minor_road", 0.7, 1],
+                  "fill-color": [
+                    "match", ["get", "kind"],
+                    ["park", "garden", "forest", "wood", "nature_reserve", "grass", "grassland",
+                     "meadow", "recreation_ground", "golf_course", "scrub", "protected_area"], "#c9e6bd",
+                    ["wetland"], "#bfe0d6",
+                    ["farmland"], "#ede3c6",
+                    ["school", "college", "university", "kindergarten", "hospital"], "#dfe6f5",
+                    ["commercial", "industrial"], "#ece1d3",
+                    ["residential"], "#eae6de",
+                    ["pedestrian", "platform"], "#e6e0d3",
+                    ["bare_rock", "quarry", "landfill"], "#d9d5cb",
+                    "#e6e2d8",
+                  ],
                 } },
-              { id: "building-tz", type: "fill", source: "offline-vector", "source-layer": "buildings", paint: { "fill-color": "#d9d6ce" } },
+              { id: "landcover", type: "fill", source: "offline-vector", "source-layer": "landcover", paint: { "fill-color": "#d0e3c8", "fill-opacity": 0.6 } },
+              { id: "water", type: "fill", source: "offline-vector", "source-layer": "water", paint: { "fill-color": "#a0c8f0" } },
+              { id: "earth", type: "fill", source: "offline-vector", "source-layer": "earth", paint: { "fill-color": "#e0e4e8" } },
+              // roads.kind (highway/major_road/minor_road/path/other/rail/ferry) is
+              // a coarse bucket; kind_detail (motorway/trunk/primary/secondary/
+              // tertiary/residential/service/footway/cycleway/...) is what real
+              // road-hierarchy styling needs - confirmed the full value set live
+              // against several cities rather than guessing at OSM's usual list.
+              // Split into a solid layer and a dashed tunnel layer (see
+              // ROAD_LINE_COLOR/WIDTH above for why) so a tunnel reads as a road
+              // running under whatever's actually on the surface there.
+              { id: "roads", type: "line", source: "offline-vector", "source-layer": "roads",
+                filter: ["!=", ["get", "is_tunnel"], true],
+                layout: { "line-cap": "round", "line-join": "round" },
+                paint: { "line-color": ROAD_LINE_COLOR, "line-width": ROAD_LINE_WIDTH } },
+              { id: "roads-tunnel", type: "line", source: "offline-vector", "source-layer": "roads",
+                filter: ["==", ["get", "is_tunnel"], true],
+                layout: { "line-cap": "round", "line-join": "round" },
+                paint: { "line-color": ROAD_LINE_COLOR, "line-width": ROAD_LINE_WIDTH, "line-dasharray": [2, 1.5] } },
+              // Road names, drivable roads only (not every footway/service drive) -
+              // symbol-placement "line" draws the text following the road's own
+              // path instead of one fixed point, which is how street labels are
+              // normally shown on a map.
+              { id: "road-labels", type: "symbol", source: "offline-vector", "source-layer": "roads",
+                minzoom: 13,
+                filter: ["all",
+                  ["has", "name"],
+                  ["in", ["get", "kind_detail"], ["literal", ["motorway", "trunk", "primary", "secondary", "tertiary", "residential", "unclassified", "living_street"]]],
+                ],
+                layout: {
+                  "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
+                  "text-font": ["Noto Sans Regular"],
+                  "text-size": 11,
+                  "symbol-placement": "line",
+                  "text-letter-spacing": 0.02,
+                },
+                paint: { "text-color": "#4a4436", "text-halo-color": "#f7f4ee", "text-halo-width": 1.2 } },
+              { id: "water-labels", type: "symbol", source: "offline-vector", "source-layer": "water",
+                minzoom: 12,
+                filter: ["has", "name"],
+                layout: {
+                  "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
+                  "text-font": ["Noto Sans Regular"],
+                  "text-size": 11,
+                },
+                paint: { "text-color": "#5a83ad", "text-halo-color": "#eef5fc", "text-halo-width": 1.2 } },
+              { id: "buildings", type: "fill", source: "offline-vector", "source-layer": "buildings",
+                paint: { "fill-color": "#d9d6ce", "fill-outline-color": "#c7c2b6" } },
               // "boundaries" carries country/region/county/locality all in one layer -
               // confirmed by decoding a real tile that county-level lines outnumber
               // country-level 7-to-1, which is what was drowning the map in orange.
               // Only country + region (e.g. England/Scotland/Wales) render here now.
-              { id: "boundaries-tz", type: "line", source: "offline-vector", "source-layer": "boundaries",
+              { id: "boundaries", type: "line", source: "offline-vector", "source-layer": "boundaries",
                 filter: ["in", ["get", "kind"], ["literal", ["country", "region"]]],
                 paint: {
                   "line-color": ["match", ["get", "kind"], "country", "#e05d00", "#f2a950"],
                   "line-width": ["match", ["get", "kind"], "country", 2.5, 1.2],
                 } },
+              // Points of interest are a real gap without this - previously nothing
+              // from the "pois" source-layer rendered at all. That layer is very
+              // dense at street level (2000+ features per tile in a real downtown
+              // sample, mostly micro-infrastructure like street lamps and traffic
+              // signals), so this is a curated allow-list of the kinds a student
+              // browsing a map actually cares about, every one confirmed present
+              // in real tiles across several cities rather than assumed from a
+              // generic OSM tag list. minzoom 13 keeps it from cluttering anything
+              // wider than a neighborhood view.
+              { id: "pois", type: "circle", source: "offline-vector", "source-layer": "pois",
+                minzoom: 13,
+                filter: ["in", ["get", "kind"], ["literal", [
+                  "restaurant", "cafe", "fast_food", "bakery", "bar", "pub", "nightclub",
+                  "school", "college", "university", "library",
+                  "supermarket", "convenience", "clothes", "shoes", "jewelry", "gift",
+                  "hairdresser", "beauty", "cosmetics", "fabric", "mobile_phone", "dry_cleaning", "optician",
+                  "station", "bus_stop", "subway_entrance", "aerodrome", "terminal",
+                  "museum", "theatre", "attraction", "artwork", "memorial", "place_of_worship",
+                  "park", "garden", "nature_reserve", "golf_course", "recreation_ground", "theme_park", "marina", "manor",
+                  "hotel", "love_hotel",
+                  "bank", "post_office", "pharmacy", "administrative", "courthouse", "information", "social_facility",
+                ]]],
+                paint: {
+                  "circle-radius": ["interpolate", ["linear"], ["zoom"], 13, 2.5, 17, 6],
+                  "circle-color": [
+                    "match", ["get", "kind"],
+                    ["restaurant", "cafe", "fast_food", "bakery", "bar", "pub", "nightclub"], "#e8734a",
+                    ["school", "college", "university", "library"], "#4a7fd6",
+                    ["supermarket", "convenience", "clothes", "shoes", "jewelry", "gift",
+                     "hairdresser", "beauty", "cosmetics", "fabric", "mobile_phone", "dry_cleaning", "optician"], "#9b59b6",
+                    ["station", "bus_stop", "subway_entrance", "aerodrome", "terminal"], "#6b7280",
+                    ["museum", "theatre", "attraction", "artwork", "memorial", "place_of_worship",
+                     "park", "garden", "nature_reserve", "golf_course", "recreation_ground", "theme_park", "marina", "manor"], "#16a085",
+                    ["hotel", "love_hotel"], "#8b5e3c",
+                    "#34495e",
+                  ],
+                  "circle-stroke-color": "#ffffff",
+                  "circle-stroke-width": 1,
+                } },
+              { id: "poi-labels", type: "symbol", source: "offline-vector", "source-layer": "pois",
+                minzoom: 15,
+                filter: ["all",
+                  ["has", "name"],
+                  ["in", ["get", "kind"], ["literal", [
+                    "restaurant", "cafe", "fast_food", "bakery", "bar", "pub", "nightclub",
+                    "school", "college", "university", "library", "supermarket",
+                    "station", "museum", "theatre", "attraction", "place_of_worship",
+                    "park", "hotel", "bank", "post_office", "pharmacy",
+                  ]]],
+                ],
+                layout: {
+                  "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
+                  "text-font": ["Noto Sans Regular"],
+                  "text-size": 10,
+                  "text-offset": [0, 1.1],
+                  "text-anchor": "top",
+                },
+                paint: { "text-color": "#3a3a3a", "text-halo-color": "#ffffff", "text-halo-width": 1.2 } },
               // "places" has a name for the local language plus per-language
               // "name:xx" alternates (confirmed on a real Japan tile: "name:en" is
               // present on ~530 of 532 features) - coalescing to name:en means Japan
@@ -271,7 +439,7 @@
               // 12 for Dublin/Glasgow down to 4 for 2000-person villages. Used to
               // drop the smallest hamlets and to prioritize which labels win
               // MapLibre's built-in collision handling at low zoom.
-              { id: "place-labels-tz", type: "symbol", source: "offline-vector", "source-layer": "places",
+              { id: "place-labels", type: "symbol", source: "offline-vector", "source-layer": "places",
                 filter: [">=", ["coalesce", ["get", "population_rank"], 0], 5],
                 layout: {
                   "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],

@@ -1,19 +1,19 @@
 <section class="tab-panel" data-tab="quickstart">
-<div class="section-title" style="margin-top:0">📦 Quick Start</div>
+<div class="section-title" style="margin-top:0">📦 {{ t('download_panel.tab_quickstart') }}</div>
 {% if bundle_remaining %}
 <div class="card dl-card bundle-card" id="bundle-card">
   <div class="dl-card-head">
     <span class="dl-emoji">🚀</span>
-    <span class="dl-name">Install Recommended Starter Bundle</span>
+    <span class="dl-name">{{ t('download_panel.bundle_title') }}</span>
   </div>
   <p class="dl-desc">
     {% for k in bundle_remaining %}{{ (quickstart.get(k, {}).name or k) }}{{ ", " if not loop.last }}{% endfor %}
-    — a well-rounded default instead of picking through six cards individually.
-    {% if bundle_remaining | length < bundle_total %}(the rest of the bundle is already installed){% endif %}
+    : {{ t('download_panel.bundle_desc') }}
+    {% if bundle_remaining | length < bundle_total %}{{ t('download_panel.bundle_rest_installed') }}{% endif %}
   </p>
-  <div class="dl-meta">{% if bundle_size %}{{ (bundle_size / 1073741824) | round(2) }} GB total{% else %}size unknown{% endif %}</div>
+  <div class="dl-meta">{% if bundle_size %}{{ (bundle_size / 1073741824) | round(2) }} GB {{ t('download_panel.total') }}{% else %}{{ t('download_panel.size_unknown') }}{% endif %}</div>
   <div class="progress" id="bundle-progress" style="display:none"><div></div></div>
-  <button class="btn" onclick="startBundle()" id="bundle-btn">Install Starter Bundle</button>
+  <button type="button" class="btn" onclick="startBundle()" id="bundle-btn">{{ t('download_panel.bundle_button') }}</button>
 </div>
 {% endif %}
 <div class="grid" id="quickstart-list">
@@ -25,14 +25,14 @@
     </div>
     <p class="dl-desc">{{ item.description }}</p>
     <div class="dl-meta">
-      {% if item.size %}{{ (item.size / 1073741824) | round(1) }} GB{% else %}size unknown{% endif %}
-      {% if not item.live %}· <span title="{{ item.error }}">using last-known URL</span>{% endif %}
+      {% if item.size %}{{ (item.size / 1073741824) | round(1) }} GB{% else %}{{ t('download_panel.size_unknown') }}{% endif %}
+      {% if not item.live %}· <span title="{{ item.error }}">{{ t('download_panel.using_last_known_url') }}</span>{% endif %}
     </div>
     <div class="progress" id="qs-progress-{{ key }}" style="display:none"><div></div></div>
     {% if key in (installed_keys | default([])) %}
-      <button class="btn secondary" disabled>✓ Installed</button>
+      <button class="btn secondary" disabled>✓ {{ t('common.installed') }}</button>
     {% else %}
-      <button class="btn" onclick="startQuickstart('{{ key }}')" id="qs-btn-{{ key }}">Download</button>
+      <button type="button" class="btn" onclick="startQuickstart('{{ key }}')" id="qs-btn-{{ key }}">{{ t('common.download') }}</button>
     {% endif %}
   </div>
   {% endfor %}
@@ -40,8 +40,8 @@
 </section>
 
 <section class="tab-panel" data-tab="llm">
-<div class="section-title" style="margin-top:0">🤖 Offline Assistant</div>
-<p class="muted" style="margin-bottom: 14px;">A small chat assistant that runs entirely on this machine — no internet, no cloud.</p>
+<div class="section-title" style="margin-top:0">🤖 {{ t('download_panel.tab_llm') }}</div>
+<p class="muted" style="margin-bottom: 14px;">{{ t('download_panel.llm_desc') }}</p>
 <div class="grid" id="llm-list">
   {% for key, item in (llm_catalogue | default({})).items() %}
   <div class="card dl-card" id="llm-row-{{ key }}">
@@ -53,9 +53,9 @@
     <div class="dl-meta">{{ (item.size / 1073741824) | round(1) }} GB</div>
     <div class="progress" id="llm-progress-{{ key }}" style="display:none"><div></div></div>
     {% if key in (installed_keys | default([])) %}
-      <button class="btn secondary" disabled>✓ Installed</button>
+      <button class="btn secondary" disabled>✓ {{ t('common.installed') }}</button>
     {% else %}
-      <button class="btn" onclick="startLLM('{{ key }}')" id="llm-btn-{{ key }}">Download</button>
+      <button type="button" class="btn" onclick="startLLM('{{ key }}')" id="llm-btn-{{ key }}">{{ t('common.download') }}</button>
     {% endif %}
   </div>
   {% endfor %}
@@ -63,8 +63,8 @@
 </section>
 
 <section class="tab-panel" data-tab="maps">
-<div class="section-title" style="margin-top:0">🗺️ Offline Maps</div>
-<p class="muted" style="margin-bottom: 14px;">Curated vector maps - roads and towns down to city level, no internet needed to browse them.</p>
+<div class="section-title" style="margin-top:0">🗺️ {{ t('download_panel.tab_maps') }}</div>
+<p class="muted" style="margin-bottom: 14px;">{{ t('download_panel.maps_desc') }}</p>
 <div class="grid" id="maps-list">
   {% for key, item in (maps_catalogue | default({})).items() %}
   <div class="card dl-card" id="map-row-{{ key }}">
@@ -76,22 +76,30 @@
     <div class="dl-meta">{{ (item.size / 1073741824) | round(2) }} GB</div>
     <div class="progress" id="map-progress-{{ key }}" style="display:none"><div></div></div>
     {% if key in (installed_keys | default([])) %}
-      <button class="btn secondary" disabled>✓ Installed</button>
+      <button class="btn secondary" disabled>✓ {{ t('common.installed') }}</button>
     {% else %}
-      <button class="btn" onclick="startMap('{{ key }}')" id="map-btn-{{ key }}">Download</button>
+      <button type="button" class="btn" onclick="startMap('{{ key }}')" id="map-btn-{{ key }}">{{ t('common.download') }}</button>
     {% endif %}
   </div>
   {% endfor %}
 </div>
+
+<div class="card" style="margin-top: 18px;">
+  <div class="section-title" style="margin-top:0">🌍 {{ t('download_panel.country_search_title') }}</div>
+  <p class="muted" style="margin-bottom: 12px;">{{ t('download_panel.country_search_desc') }}</p>
+  <input type="text" id="country-q" placeholder="{{ t('download_panel.country_search_placeholder') }}"
+         oninput="filterCountries()" style="margin-top:0;" autocomplete="off" />
+  <div class="grid" id="country-results" style="margin-top: 16px;"></div>
+</div>
 </section>
 
 <section class="tab-panel" data-tab="discover">
-<div class="section-title" style="margin-top:0">🔎 Discover More Content</div>
+<div class="section-title" style="margin-top:0">🔎 {{ t('download_panel.discover_title') }}</div>
 <div class="card">
-  <p class="muted" style="margin-bottom: 12px;">Search the live Kiwix library for anything else (subjects, languages, other wikis).</p>
+  <p class="muted" style="margin-bottom: 12px;">{{ t('download_panel.discover_desc') }}</p>
   <form onsubmit="return doSearch(event)" style="display:flex; gap:10px;">
-    <input type="text" id="search-q" placeholder="e.g. wikipedia french, science, khan academy" style="margin-top:0;" />
-    <button type="submit" class="secondary" style="flex-shrink:0;">Search</button>
+    <input type="text" id="search-q" placeholder="{{ t('download_panel.discover_placeholder') }}" style="margin-top:0;" />
+    <button type="submit" class="secondary" style="flex-shrink:0;">{{ t('common.search') }}</button>
   </form>
   <div class="grid" id="search-results" style="margin-top: 16px;"></div>
 </div>
@@ -109,6 +117,14 @@
 </style>
 
 <script>
+  const T_INSTALLED = "✓ {{ t('common.installed') | e }}";
+  const T_RETRY = "{{ t('common.retry') | e }}";
+  const T_DOWNLOAD_FAILED = "{{ t('download_panel.download_failed') | e }}";
+  const T_BUNDLE_FAILED = "{{ t('download_panel.bundle_failed') | e }}";
+  const T_SEARCHING = "{{ t('download_panel.searching') | e }}";
+  const T_NO_RESULTS = "{{ t('download_panel.no_results') | e }}";
+  const T_ARTICLES = "{{ t('download_panel.articles') | e }}";
+
   async function pollJob(jobId, onProgress, onDone) {
     const poll = async () => {
       const r = await fetch(`/admin/downloads/${jobId}/status`);
@@ -135,11 +151,11 @@
           (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
           (job) => {
             if (job.success) {
-              btn.textContent = "✓ Installed";
+              btn.textContent = T_INSTALLED;
               location.reload();  // refreshes card states across the whole panel
             } else {
               btn.disabled = false;
-              alert(job.error || "Starter bundle install failed.");
+              alert(job.error || T_BUNDLE_FAILED);
             }
           }
         );
@@ -159,13 +175,13 @@
     })
       .then((r) => r.json())
       .then((data) => {
-        if (data.error) { btn.disabled = false; btn.textContent = "Retry"; alert(data.error); return; }
+        if (data.error) { btn.disabled = false; btn.textContent = T_RETRY; alert(data.error); return; }
         pollJob(
           data.job_id,
           (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
           (job) => {
-            if (job.success) { btn.textContent = "✓ Installed"; }
-            else { btn.disabled = false; btn.textContent = "Retry"; alert(job.error || "Download failed."); }
+            if (job.success) { btn.textContent = T_INSTALLED; }
+            else { btn.disabled = false; btn.textContent = T_RETRY; alert(job.error || T_DOWNLOAD_FAILED); }
           }
         );
       });
@@ -184,13 +200,13 @@
     })
       .then((r) => r.json())
       .then((data) => {
-        if (data.error) { btn.disabled = false; btn.textContent = "Retry"; alert(data.error); return; }
+        if (data.error) { btn.disabled = false; btn.textContent = T_RETRY; alert(data.error); return; }
         pollJob(
           data.job_id,
           (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
           (job) => {
-            if (job.success) { btn.textContent = "✓ Installed"; }
-            else { btn.disabled = false; btn.textContent = "Retry"; alert(job.error || "Download failed."); }
+            if (job.success) { btn.textContent = T_INSTALLED; }
+            else { btn.disabled = false; btn.textContent = T_RETRY; alert(job.error || T_DOWNLOAD_FAILED); }
           }
         );
       });
@@ -209,13 +225,13 @@
     })
       .then((r) => r.json())
       .then((data) => {
-        if (data.error) { btn.disabled = false; btn.textContent = "Retry"; alert(data.error); return; }
+        if (data.error) { btn.disabled = false; btn.textContent = T_RETRY; alert(data.error); return; }
         pollJob(
           data.job_id,
           (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
           (job) => {
-            if (job.success) { btn.textContent = "✓ Installed"; }
-            else { btn.disabled = false; btn.textContent = "Retry"; alert(job.error || "Download failed."); }
+            if (job.success) { btn.textContent = T_INSTALLED; }
+            else { btn.disabled = false; btn.textContent = T_RETRY; alert(job.error || T_DOWNLOAD_FAILED); }
           }
         );
       });
@@ -226,7 +242,7 @@
     const q = document.getElementById("search-q").value.trim();
     const results = document.getElementById("search-results");
     if (!q) return false;
-    results.innerHTML = `<p class="muted">Searching…</p>`;
+    results.innerHTML = `<p class="muted">${T_SEARCHING}</p>`;
 
     fetch("/admin/downloads/search", {
       method: "POST",
@@ -236,7 +252,7 @@
       .then((r) => r.json())
       .then((data) => {
         if (data.error) { results.innerHTML = `<p class="muted">${data.error}</p>`; return; }
-        if (!data.results.length) { results.innerHTML = `<p class="muted">No results.</p>`; return; }
+        if (!data.results.length) { results.innerHTML = `<p class="muted">${T_NO_RESULTS}</p>`; return; }
 
         results.innerHTML = "";
         data.results.forEach((item, i) => {
@@ -249,9 +265,9 @@
               <span class="dl-name">${item.title}${item.flavour ? " (" + item.flavour + ")" : ""}</span>
             </div>
             <p class="dl-desc">${item.summary || ""}</p>
-            <div class="dl-meta">${item.language} · ${item.article_count.toLocaleString()} articles · ${gb} GB</div>
+            <div class="dl-meta">${item.language} · ${item.article_count.toLocaleString()} ${T_ARTICLES} · ${gb} GB</div>
             <div class="progress" id="sr-progress-${i}" style="display:none"><div></div></div>
-            <button class="btn" id="sr-btn-${i}" onclick='startCustom(${i}, ${JSON.stringify(item)})'>Download</button>`;
+            <button type="button" class="btn" id="sr-btn-${i}" onclick='startCustom(${i}, ${JSON.stringify(item)})'>{{ t('common.download') | e }}</button>`;
           results.appendChild(card);
         });
       });
@@ -271,13 +287,84 @@
     })
       .then((r) => r.json())
       .then((data) => {
-        if (data.error) { btn.disabled = false; btn.textContent = "Retry"; alert(data.error); return; }
+        if (data.error) { btn.disabled = false; btn.textContent = T_RETRY; alert(data.error); return; }
         pollJob(
           data.job_id,
           (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
           (job) => {
-            if (job.success) { btn.textContent = "✓ Installed"; }
-            else { btn.disabled = false; btn.textContent = "Retry"; alert(job.error || "Download failed."); }
+            if (job.success) { btn.textContent = T_INSTALLED; }
+            else { btn.disabled = false; btn.textContent = T_RETRY; alert(job.error || T_DOWNLOAD_FAILED); }
+          }
+        );
+      });
+  }
+
+  // ── Self-serve country maps ────────────────────────────────────────────────
+  // The country list (core/data/country_bboxes.json, ~170 entries) is fetched
+  // once and filtered client-side as the admin types - no per-keystroke
+  // network round trip, unlike the ZIM "Discover" search above which hits a
+  // live API. Each entry already carries its own auto-picked maxzoom/size
+  // estimate (core/map_extract.py's pick_maxzoom), computed server-side from
+  // pure bbox math, so no extra request is needed just to show those numbers.
+  let allCountries = null;
+
+  async function loadCountries() {
+    if (allCountries) return allCountries;
+    const r = await fetch("/admin/downloads/countries");
+    const data = await r.json();
+    allCountries = data.countries || [];
+    return allCountries;
+  }
+
+  async function filterCountries() {
+    const q = document.getElementById("country-q").value.trim().toLowerCase();
+    const results = document.getElementById("country-results");
+    if (!q) { results.innerHTML = ""; return; }
+
+    const countries = await loadCountries();
+    const matches = countries.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 24);
+    if (!matches.length) { results.innerHTML = `<p class="muted">${T_NO_RESULTS}</p>`; return; }
+
+    results.innerHTML = "";
+    matches.forEach((c) => {
+      const card = document.createElement("div");
+      card.className = "card dl-card";
+      const meta = `~${c.est_size_mb} MB · {{ t('download_panel.country_zoom_label') | e }} ${c.maxzoom}`;
+      const installedBtn = `<button class="btn secondary" disabled>✓ {{ t('common.installed') | e }}</button>`;
+      const downloadBtn = `<button type="button" class="btn" id="country-btn-${c.iso}" onclick="startCountryMap('${c.iso}')">{{ t('common.download') | e }}</button>`;
+      card.innerHTML = `
+        <div class="dl-card-head">
+          <span class="dl-emoji">🗺️</span>
+          <span class="dl-name">${c.name}</span>
+        </div>
+        <p class="dl-desc">{{ t('download_panel.country_est_desc') | e }}</p>
+        <div class="dl-meta">${meta}</div>
+        <div class="progress" id="country-progress-${c.iso}" style="display:none"><div></div></div>
+        ${c.installed ? installedBtn : downloadBtn}`;
+      results.appendChild(card);
+    });
+  }
+
+  function startCountryMap(iso) {
+    const btn = document.getElementById(`country-btn-${iso}`);
+    const bar = document.getElementById(`country-progress-${iso}`);
+    btn.disabled = true;
+    bar.style.display = "block";
+
+    fetch("/admin/downloads/map_country", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ iso }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) { btn.disabled = false; btn.textContent = T_RETRY; alert(data.error); return; }
+        pollJob(
+          data.job_id,
+          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
+          (job) => {
+            if (job.success) { btn.textContent = T_INSTALLED; }
+            else { btn.disabled = false; btn.textContent = T_RETRY; alert(job.error || T_DOWNLOAD_FAILED); }
           }
         );
       });

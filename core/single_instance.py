@@ -1,5 +1,5 @@
 """
-single_instance — OS-level guard against a second OfflineHub process
+single_instance: OS-level guard against a second OfflineHub process
 running at the same time.
 
 Confirmed live this session: nothing stopped a second launch, and two

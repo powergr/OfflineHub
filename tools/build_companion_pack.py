@@ -1,5 +1,5 @@
 """
-build_companion_pack — assembles a downloadable "companion zip" of pre-fetched
+build_companion_pack: assembles a downloadable "companion zip" of pre-fetched
 content modules, for testing (or distributing) without re-downloading the
 same files every time C:\\OfflineHub gets wiped.
 
@@ -164,7 +164,7 @@ def main():
 
     print(f"\nTotal time: {(time.time() - t0) / 60:.1f} min")
     print(f"Unzip {args.out} directly into C:\\OfflineHub\\ (so it creates")
-    print("C:\\OfflineHub\\modules\\<key>\\...) — modules are picked up automatically")
+    print("C:\\OfflineHub\\modules\\<key>\\...). Modules are picked up automatically")
     print("the next time the app starts.")
 
 

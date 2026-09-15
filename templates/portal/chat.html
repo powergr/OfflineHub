@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ current_lang }}">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -23,6 +23,8 @@
       #prompt { flex:1; padding: 12px 14px; border-radius: var(--radius-sm); resize: none; }
       #send { padding: 0 22px; border-radius: var(--radius-sm); }
       .hint { color: var(--muted); font-size: 12px; text-align: center; padding-top: 10px; }
+      .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent2); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; }
+      @keyframes spin { to { transform: rotate(360deg); } }
     </style>
   </head>
   <body>
@@ -31,22 +33,27 @@
       <strong>{{ module.name }}</strong>
       <span class="spacer"></span>
       <span class="version-badge">v{{ app_version }}</span>
-      <a href="/">&larr; Back to hub</a>
+      <a href="/">&larr; {{ t('chat.back_to_hub') }}</a>
     </header>
 
     <div id="log">
-      <div class="msg assistant"><div class="bubble"><div class="role">Assistant</div>Ask me anything. I run entirely offline on this machine.</div></div>
+      <div class="msg assistant"><div class="bubble"><div class="role">{{ t('chat.assistant_label') }}</div>{{ t('chat.greeting') }}</div></div>
     </div>
 
     <div id="composer">
       <form id="form">
-        <textarea id="prompt" rows="1" placeholder="Type a message…"></textarea>
-        <button id="send" type="submit">Send</button>
+        <textarea id="prompt" rows="1" placeholder="{{ t('chat.placeholder') }}"></textarea>
+        <button id="send" type="submit">{{ t('common.send') }}</button>
       </form>
-      <p class="hint">Runs on this computer's CPU — replies may take a moment.</p>
+      <p class="hint">{{ t('chat.hint') }}</p>
     </div>
 
     <script>
+      const T_ASSISTANT_LABEL = {{ t('chat.assistant_label') | tojson }};
+      const T_QUEUE_PERSON = {{ t('chat.queue_person') | tojson }};
+      const T_QUEUE_PEOPLE = {{ t('chat.queue_people') | tojson }};
+      const T_QUEUE_SUFFIX = {{ t('chat.queue_suffix') | tojson }};
+      const T_CONNECTION_ERROR = {{ t('chat.connection_error') | tojson }};
       const moduleId = {{ module_id | tojson }};
       const log = document.getElementById("log");
       const form = document.getElementById("form");
@@ -65,7 +72,7 @@
         div.className = "msg " + role;
         const bubble = document.createElement("div");
         bubble.className = "bubble";
-        if (role === "assistant") bubble.innerHTML = `<div class="role">Assistant</div>`;
+        if (role === "assistant") bubble.innerHTML = `<div class="role">${T_ASSISTANT_LABEL}</div>`;
         const body = document.createElement("span");
         body.textContent = text;
         bubble.appendChild(body);
@@ -79,7 +86,12 @@
         sendBtn.disabled = true;
         addMessage("user", prompt);
         const replyEl = addMessage("assistant", "");
+        const spinner = document.createElement("span");
+        spinner.className = "spinner";
+        replyEl.parentElement.insertBefore(spinner, replyEl);
+        const removeSpinner = () => { if (spinner.parentElement) spinner.remove(); };
         let hadError = false;
+        let inQueue = false;
 
         try {
           const resp = await fetch(`/api/chat/${encodeURIComponent(moduleId)}/stream`, {
@@ -112,10 +124,23 @@
                 let text = chunk.slice(5);
                 if (text.startsWith(" ")) text = text.slice(1);
                 text = text.replace(/\\n/g, "\n");
-                if (text.startsWith("[error]")) {
+                if (text.startsWith("[queue]")) {
+                  // The server serializes generation one request at a time
+                  // (CPU inference) - while this request is waiting its
+                  // turn, show how many are ahead instead of leaving the
+                  // student staring at a blank reply bubble wondering if
+                  // anything is happening.
+                  removeSpinner();
+                  const n = text.slice(7).trim();
+                  replyEl.textContent = `⏳ ${n} ${n === "1" ? T_QUEUE_PERSON : T_QUEUE_PEOPLE} ${T_QUEUE_SUFFIX}`;
+                  inQueue = true;
+                } else if (text.startsWith("[error]")) {
+                  removeSpinner();
                   hadError = true;
                   replyEl.textContent += "\n" + text;
                 } else {
+                  removeSpinner();
+                  if (inQueue) { replyEl.textContent = ""; inQueue = false; }
                   replyEl.textContent += text;
                 }
                 log.scrollTop = log.scrollHeight;
@@ -123,9 +148,11 @@
             }
           }
         } catch (e) {
+          removeSpinner();
           hadError = true;
-          replyEl.textContent += "\n[connection error]";
+          replyEl.textContent += "\n" + T_CONNECTION_ERROR;
         } finally {
+          removeSpinner();
           // Only remembered on success - an error message isn't something
           // the model actually said, and feeding it back in as if it were
           // a real reply would corrupt every later turn in this chat.

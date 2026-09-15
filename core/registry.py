@@ -1,5 +1,5 @@
 """
-ContentRegistry — tracks installed modules' in-process handles and status.
+ContentRegistry: tracks installed modules' in-process handles and status.
 
 Replaces the old ServiceManager. Nothing here is a subprocess anymore: ZIM
 modules are read in-process via libzim, mbtiles modules are read in-process

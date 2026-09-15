@@ -1,17 +1,17 @@
 {% extends "admin/base.html" %}
-{% block title %}Login{% endblock %}
+{% block title %}{{ t('login.title') }}{% endblock %}
 {% block bare %}
 <div class="card" style="width: 360px; max-width: 92vw;">
   <div style="text-align:center; margin-bottom: 6px;">
     <div style="font-size: 34px;">🔐</div>
-    <h1 style="font-size: 20px; font-weight: 700; margin-top: 8px;">Admin Login</h1>
-    <p class="muted" style="margin-top: 4px;">Offline Knowledge Hub</p>
+    <h1 style="font-size: 20px; font-weight: 700; margin-top: 8px;">{{ t('login.title') }}</h1>
+    <p class="muted" style="margin-top: 4px;">{{ t('app.brand_full') }}</p>
   </div>
   {% if error %}<div class="flash flash-error" style="margin-top: 16px;">{{ error }}</div>{% endif %}
   <form method="post" style="margin-top: 10px;">
-    <label for="password">Password</label>
+    <label for="password">{{ t('common.password') }}</label>
     <input type="password" id="password" name="password" autofocus required />
-    <button type="submit" style="width:100%; justify-content:center; margin-top:18px;">Log In</button>
+    <button type="submit" style="width:100%; justify-content:center; margin-top:18px;">{{ t('login.log_in') }}</button>
   </form>
   <div style="text-align:center; margin-top: 18px;">
     <span class="version-badge">v{{ app_version }}</span>

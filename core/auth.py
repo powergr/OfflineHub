@@ -1,5 +1,5 @@
 """
-auth — admin password hashing, shared by the setup flow and the settings page.
+auth: admin password hashing, shared by the setup flow and the settings page.
 
 Each install generates its own random salt (stored in config.json as
 "admin_password_salt") rather than a single hardcoded salt shared by every

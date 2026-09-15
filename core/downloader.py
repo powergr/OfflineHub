@@ -1,5 +1,5 @@
 """
-Downloader — resumable HTTP downloads with progress callbacks and checksum
+Downloader: resumable HTTP downloads with progress callbacks and checksum
 verification, plus live resolution of current Kiwix ZIM download URLs.
 
 Kiwix rotates dated snapshot filenames and deletes old ones (e.g.
@@ -13,6 +13,7 @@ import hashlib
 import logging
 import os
 import threading
+import time
 import xml.etree.ElementTree as ET
 from typing import Callable
 
@@ -34,7 +35,7 @@ _ACQUISITION_REL = "http://opds-spec.org/acquisition/open-access"
 # and checksum are resolved live via resolve_catalogue_entry() so this never
 # goes stale the way a hardcoded filename does. Khan Academy is deliberately
 # not curated here: the Kiwix library now only publishes a single ~180GB
-# "all" ZIM for it (no small subject-specific version exists anymore) —
+# "all" ZIM for it (no small subject-specific version exists anymore),
 # unreasonable as a "quick start" button. Use search_catalogue() instead to
 # let the admin browse the live library and see real sizes before choosing.
 
@@ -42,7 +43,7 @@ CATALOGUE: dict[str, dict] = {
     "wikipedia_en_mini": {
         "name":        "Wikipedia (English, Mini)",
         "emoji":       "📚",
-        "description": "Top Wikipedia articles — text only, no images.",
+        "description": "Top Wikipedia articles, text only, no images.",
         "opds_name":   "wikipedia_en_all",
         "opds_flavour": "mini",
         "server":      "zim",
@@ -66,7 +67,7 @@ CATALOGUE: dict[str, dict] = {
     "wikipedia_en_simple": {
         "name":        "Wikipedia (Simple English)",
         "emoji":       "🔤",
-        "description": "Simplified vocabulary and shorter sentences — good for younger or ESL readers.",
+        "description": "Simplified vocabulary and shorter sentences, good for younger or ESL readers.",
         "opds_name":   "wikipedia_en-simple_all",
         "opds_flavour": "mini",
         "server":      "zim",
@@ -95,6 +96,85 @@ CATALOGUE: dict[str, dict] = {
         "opds_flavour": "nopic",
         "server":      "zim",
     },
+
+    # ── Non-English (Phase 3: "more content variety") ───────────────────────
+    # Checked live against the Kiwix catalog before adding rather than
+    # guessed - e.g. there's no non-English "mini" flavour of every language
+    # some only ship "maxi"/"nopic", and sizes vary a lot by language
+    # (Spanish/French each have ~4M articles, so "mini" is still ~3.5GB,
+    # nowhere near English "mini"'s ~12GB but not small either). Paired each
+    # language with its own Vikidia (kids' encyclopedia), which is a much
+    # smaller, easy first download in that language.
+    "wikipedia_es_mini": {
+        "name":        "Wikipedia (Spanish, Mini)",
+        "emoji":       "🇪🇸",
+        "description": "Top Spanish Wikipedia articles, text only, no images.",
+        "opds_name":   "wikipedia_es_all",
+        "opds_flavour": "mini",
+        "lang":        "spa",
+        "server":      "zim",
+    },
+    "vikidia_es": {
+        "name":        "Vikidia (Spanish)",
+        "emoji":       "🧒",
+        "description": "A kids' encyclopedia in Spanish, written for ~8-13 year olds.",
+        "opds_name":   "vikidia_es_all",
+        "opds_flavour": "nopic",
+        "lang":        "spa",
+        "server":      "zim",
+    },
+    "wikipedia_fr_mini": {
+        "name":        "Wikipedia (French, Mini)",
+        "emoji":       "🇫🇷",
+        "description": "Top French Wikipedia articles, text only, no images.",
+        "opds_name":   "wikipedia_fr_all",
+        "opds_flavour": "mini",
+        "lang":        "fra",
+        "server":      "zim",
+    },
+    "vikidia_fr": {
+        "name":        "Vikidia (French)",
+        "emoji":       "🧒",
+        "description": "A kids' encyclopedia in French, written for ~8-13 year olds.",
+        "opds_name":   "vikidia_fr_all",
+        "opds_flavour": "nopic",
+        "lang":        "fra",
+        "server":      "zim",
+    },
+
+    # ── Subject-specific (Phase 3: "more subject-specific content beyond
+    # PhET") ─────────────────────────────────────────────────────────────
+    # Kiwix curates dozens of subject-filtered Wikipedia slices; checked
+    # live for which subjects actually exist rather than assuming ("civics"
+    # and "art" specifically do NOT exist as of this check - "history",
+    # "mathematics", and "chemistry" do). Picked the smallest flavour
+    # (nopic/mini) that still keeps real article counts, matching how the
+    # existing wikipedia_en_mini/wiktionary_en_simple entries above already
+    # favor a light footprint over the full-image "maxi" builds.
+    "wikipedia_en_history": {
+        "name":        "Wikipedia (History)",
+        "emoji":       "📜",
+        "description": "224,000+ history articles, from ancient civilizations to modern events.",
+        "opds_name":   "wikipedia_en_history",
+        "opds_flavour": "nopic",
+        "server":      "zim",
+    },
+    "wikipedia_en_mathematics": {
+        "name":        "Wikipedia (Mathematics)",
+        "emoji":       "🔢",
+        "description": "112,000+ mathematics articles, from arithmetic to advanced topics.",
+        "opds_name":   "wikipedia_en_mathematics",
+        "opds_flavour": "mini",
+        "server":      "zim",
+    },
+    "wikipedia_en_chemistry": {
+        "name":        "Wikipedia (Chemistry)",
+        "emoji":       "⚗️",
+        "description": "57,000+ chemistry articles, from the periodic table to organic chemistry.",
+        "opds_name":   "wikipedia_en_chemistry",
+        "opds_flavour": "mini",
+        "server":      "zim",
+    },
 }
 
 # Recommended "install everything a normal school wants" default, used by
@@ -113,7 +193,7 @@ STARTER_BUNDLE_KEYS: list[str] = [
 
 # Last-known-good fallback, used only if the live OPDS lookup fails (e.g. no
 # internet at that moment, or the API changes shape). May go stale over time
-# like the old hardcoded catalogue did — it's a safety net, not the primary path.
+# like the old hardcoded catalogue did. It's a safety net, not the primary path.
 _FALLBACK_URLS = {
     "wikipedia_en_mini":   "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_mini_2026-06.zim",
     "gutenberg_lcc_l":     "https://download.kiwix.org/zim/gutenberg/gutenberg_en_lcc-l_2026-03.zim",
@@ -122,6 +202,13 @@ _FALLBACK_URLS = {
     "phet_simulations":    "https://download.kiwix.org/zim/phet/phet_en_all_2026-08.zim",
     "wikibooks_en":        "https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_maxi_2026-04.zim",
     "wiktionary_en_simple": "https://download.kiwix.org/zim/wiktionary/wiktionary_en-simple_all_nopic_2026-07.zim",
+    "wikipedia_es_mini":    "https://lb.download.kiwix.org/zim/wikipedia/wikipedia_es_all_mini_2026-08.zim",
+    "vikidia_es":           "https://lb.download.kiwix.org/zim/vikidia/vikidia_es_all_nopic_2026-09.zim",
+    "wikipedia_fr_mini":    "https://lb.download.kiwix.org/zim/wikipedia/wikipedia_fr_all_mini_2026-05.zim",
+    "vikidia_fr":           "https://lb.download.kiwix.org/zim/vikidia/vikidia_fr_all_nopic_2026-09.zim",
+    "wikipedia_en_history": "https://lb.download.kiwix.org/zim/wikipedia/wikipedia_en_history_nopic_2026-07.zim",
+    "wikipedia_en_mathematics": "https://lb.download.kiwix.org/zim/wikipedia/wikipedia_en_mathematics_mini_2026-06.zim",
+    "wikipedia_en_chemistry": "https://lb.download.kiwix.org/zim/wikipedia/wikipedia_en_chemistry_mini_2026-07.zim",
 }
 
 # ── Offline LLM (onnxruntime-genai model) ────────────────────────────────────
@@ -131,7 +218,7 @@ _FALLBACK_URLS = {
 # constant) because different model repos use different onnx filenames (some
 # ship "model.onnx", others "phi3-mini-4k-instruct-....onnx") and different
 # subfolder layouts. File lists and sizes below were checked live against
-# each repo's file tree this session — Hugging Face repos do get reorganized
+# each repo's file tree this session. Hugging Face repos do get reorganized
 # over time, so if one ever starts 404ing, check that repo's current file
 # tree before assuming the code is at fault. All three are ungated/MIT or
 # Apache-licensed public repos (no HF login/token needed to download).
@@ -144,7 +231,7 @@ _FALLBACK_URLS = {
 
 LLM_CATALOGUE: dict[str, dict] = {
     "assistant_phi3_mini": {
-        "name":        "Offline Assistant — Phi-3-mini 3.8B (~2.7 GB)",
+        "name":        "Offline Assistant: Phi-3-mini 3.8B (~2.7 GB)",
         "emoji":       "🤖",
         "description": "Noticeably smarter than the 0.5B model at a modest size. A good "
                         "middle ground if you want better answers but limited disk space.",
@@ -159,7 +246,7 @@ LLM_CATALOGUE: dict[str, dict] = {
         ],
     },
     "assistant_phi4_mini": {
-        "name":        "Offline Assistant — Phi-4-mini 3.8B (~4.9 GB, recommended)",
+        "name":        "Offline Assistant: Phi-4-mini 3.8B (~4.9 GB, recommended)",
         "emoji":       "⭐",
         "description": "Newer and noticeably better quality than Phi-3-mini at a similar "
                         "parameter count. Recommended default for most PCs (~5GB disk, 8GB+ RAM).",
@@ -173,7 +260,7 @@ LLM_CATALOGUE: dict[str, dict] = {
         ],
     },
     "assistant_phi3_medium": {
-        "name":        "Offline Assistant — Phi-3-medium 14B (~9.3 GB, largest)",
+        "name":        "Offline Assistant: Phi-3-medium 14B (~9.3 GB, largest)",
         "emoji":       "🏋️",
         "description": "The best answer quality of these options, but needs a capable "
                         "PC (16GB+ RAM) and is noticeably slower per reply.",
@@ -335,17 +422,37 @@ def search_catalogue(query: str, lang: str = "eng", count: int = 20, timeout: in
     return results
 
 
-def refresh_catalogue() -> dict:
+# refresh_catalogue() used to do a live HTTP request per CATALOGUE entry on
+# every single call (one per key: currently 14, growing as more are added),
+# with no caching at all - confirmed live to be the actual cause of "the
+# Modules page takes a long time to open," since both setup() and modules()
+# call it fresh on every page load. Cached here for _CATALOGUE_CACHE_TTL so
+# repeat page loads within that window are instant, while still refreshing
+# automatically often enough to catch a real newer Kiwix snapshot.
+_CATALOGUE_CACHE_TTL = 300  # seconds
+_catalogue_cache: dict | None = None
+_catalogue_cache_at: float = 0.0
+
+
+def refresh_catalogue(force: bool = False) -> dict:
     """
     Returns CATALOGUE merged with a live-resolved url/size per entry, falling
     back to the last-known-good static URL (with unknown size) if the live
-    lookup fails for a given item.
+    lookup fails for a given item. Cached for _CATALOGUE_CACHE_TTL seconds;
+    pass force=True to bypass the cache and re-resolve every entry live.
     """
+    global _catalogue_cache, _catalogue_cache_at
+    now = time.monotonic()
+    if not force and _catalogue_cache is not None and (now - _catalogue_cache_at) < _CATALOGUE_CACHE_TTL:
+        return _catalogue_cache
+
     resolved = {}
     for key, item in CATALOGUE.items():
         merged = dict(item)
         try:
-            live = resolve_catalogue_entry(item["opds_name"], item.get("opds_flavour"))
+            live = resolve_catalogue_entry(
+                item["opds_name"], item.get("opds_flavour"), lang=item.get("lang", "eng")
+            )
             merged["url"] = live["url"]
             merged["size"] = live["size"]
             merged["live"] = True
@@ -356,6 +463,9 @@ def refresh_catalogue() -> dict:
             merged["error"] = str(exc)
         merged["dest"] = os.path.join(DOWNLOAD_DIR, f"{key}.zim")
         resolved[key] = merged
+
+    _catalogue_cache = resolved
+    _catalogue_cache_at = now
     return resolved
 
 

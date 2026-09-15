@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ current_lang }}">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Search — {{ module_id }}</title>
+    <title>{{ t('common.search') }} - {{ module_id }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
     <style>
       .wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px; }
@@ -20,18 +20,18 @@
   <body>
     <div class="wrap">
       <div class="top-row">
-        <a class="back" href="/content/{{ module_id }}/">&larr; Back to article</a>
+        <a class="back" href="/content/{{ module_id }}/">&larr; {{ t('portal.back_to_article') }}</a>
         <span class="version-badge">v{{ app_version }}</span>
       </div>
       <form method="get">
-        <input type="text" name="q" value="{{ query }}" placeholder="Search this library…" autofocus />
-        <button type="submit">Search</button>
+        <input type="text" name="q" value="{{ query }}" placeholder="{{ t('portal.search_placeholder') }}" autofocus />
+        <button type="submit">{{ t('common.search') }}</button>
       </form>
 
       {% if not has_search %}
-        <p class="muted">This library doesn't have a built-in search index.</p>
+        <p class="muted">{{ t('portal.no_search_index') }}</p>
       {% elif query and not results %}
-        <p class="muted">No results for "{{ query }}".</p>
+        <p class="muted">{{ t('portal.no_results_for', query=query) }}</p>
       {% elif results %}
         <ul>
           {% for title, path in results %}

@@ -1,5 +1,5 @@
 """
-build_map_packs — builds the curated offline map .mbtiles files (a small
+build_map_packs: builds the curated offline map .mbtiles files (a small
 global default set: USA, UK, Germany, France, Japan, plus a low-detail world
 overview) from Protomaps' free, no-login daily basemap build.
 
@@ -29,7 +29,6 @@ Run from the repo root:
 """
 
 import argparse
-import json
 import os
 import shutil
 import sqlite3
@@ -38,6 +37,9 @@ import sys
 from datetime import date, timedelta
 
 from pmtiles.reader import MmapSource, Reader, all_tiles  # pip install pmtiles
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from core.map_extract import write_mbtiles_schema  # shared mbtiles-schema writer
 
 SOURCE_URL_TEMPLATE = "https://build.protomaps.com/{date}.pmtiles"
 
@@ -95,29 +97,11 @@ def _convert_to_mbtiles(pmtiles_path: str, mbtiles_path: str):
         header = reader.header()
         meta = reader.metadata()
 
-        conn = sqlite3.connect(mbtiles_path)
-        conn.execute("CREATE TABLE metadata (name TEXT, value TEXT)")
-        conn.execute(
-            "CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, "
-            "tile_row INTEGER, tile_data BLOB)"
-        )
-        conn.execute("CREATE UNIQUE INDEX tile_index ON tiles (zoom_level, tile_column, tile_row)")
-
         bounds = (header["min_lon_e7"] / 1e7, header["min_lat_e7"] / 1e7,
                   header["max_lon_e7"] / 1e7, header["max_lat_e7"] / 1e7)
-        kv = {
-            "name": meta.get("name", os.path.basename(mbtiles_path)),
-            "format": "pbf",
-            "type": "baselayer",
-            "version": "1",
-            "description": meta.get("description", ""),
-            "attribution": meta.get("attribution", ""),
-            "minzoom": str(header["min_zoom"]),
-            "maxzoom": str(header["max_zoom"]),
-            "bounds": ",".join(str(round(b, 6)) for b in bounds),
-            "json": json.dumps({"vector_layers": meta.get("vector_layers", [])}),
-        }
-        conn.executemany("INSERT INTO metadata VALUES (?, ?)", kv.items())
+        conn = sqlite3.connect(mbtiles_path)
+        write_mbtiles_schema(conn, bounds, header["max_zoom"], meta,
+                              meta.get("name", os.path.basename(mbtiles_path)))
 
         batch = []
         for (z, x, y), data in all_tiles(get_bytes):

@@ -1,12 +1,12 @@
 import errno
 import hashlib
 import os
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 import requests
 
-from core.downloader import Downloader, _friendly_error
+from core.downloader import CATALOGUE, Downloader, _friendly_error, refresh_catalogue
 
 
 class FakeResponse:
@@ -246,3 +246,75 @@ def test_friendly_error_network_error():
 def test_friendly_error_generic_exception_falls_back_to_str():
     exc = ValueError("something else broke")
     assert _friendly_error(exc) == "something else broke"
+
+
+def test_refresh_catalogue_passes_each_entrys_own_lang_not_hardcoded_eng():
+    """Regression test: Kiwix's OPDS `lang` param filters server-side, so a
+    non-English CATALOGUE entry (e.g. Spanish Wikipedia) needs its own
+    "lang" field passed through - hardcoding lang="eng" for every entry
+    made every non-English catalogue item fail to resolve at all, confirmed
+    live before this fix (resolve_catalogue_entry raised CatalogueError for
+    wikipedia_es_all when queried with lang="eng")."""
+    assert "wikipedia_es_mini" in CATALOGUE  # this test is only meaningful once such an entry exists
+    assert CATALOGUE["wikipedia_es_mini"]["lang"] == "spa"
+
+    xml = b'''<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Wikipedia (Spanish, Mini)</title>
+    <flavour>mini</flavour>
+    <link rel="http://opds-spec.org/acquisition/open-access"
+          href="https://example.test/wikipedia_es_all_mini.zim" length="12345"/>
+  </entry>
+</feed>'''
+    resp = Mock()
+    resp.content = xml
+    resp.raise_for_status = Mock()
+    captured_params = []
+
+    def fake_get(url, params=None, timeout=None):
+        captured_params.append(params)
+        return resp
+
+    with patch("core.downloader.requests.get", side_effect=fake_get):
+        result = refresh_catalogue(force=True)
+
+    spanish_calls = [p for p in captured_params if p.get("name") == "wikipedia_es_all"]
+    assert spanish_calls, "wikipedia_es_all was never queried"
+    assert spanish_calls[0]["lang"] == "spa"  # not the hardcoded default "eng"
+    assert result["wikipedia_es_mini"]["live"] is True
+    assert result["wikipedia_es_mini"]["url"] == "https://example.test/wikipedia_es_all_mini.zim"
+
+
+def test_refresh_catalogue_is_cached_and_does_not_refetch_every_call():
+    """Regression test: the Modules page used to do one live HTTP request per
+    CATALOGUE entry on every single page load (no caching at all), confirmed
+    live to be the actual cause of the page taking a long time to open. A
+    second call within the cache window must not hit the network again."""
+    xml = b'''<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Wikipedia (English, Mini)</title>
+    <flavour>mini</flavour>
+    <link rel="http://opds-spec.org/acquisition/open-access"
+          href="https://example.test/wikipedia_en_all_mini.zim" length="12345"/>
+  </entry>
+</feed>'''
+    resp = Mock()
+    resp.content = xml
+    resp.raise_for_status = Mock()
+    call_count = 0
+
+    def fake_get(url, params=None, timeout=None):
+        nonlocal call_count
+        call_count += 1
+        return resp
+
+    with patch("core.downloader.requests.get", side_effect=fake_get):
+        refresh_catalogue(force=True)
+        first_count = call_count
+        refresh_catalogue()  # should be served from cache, no new requests
+        assert call_count == first_count
+
+        refresh_catalogue(force=True)  # explicit bypass hits the network again
+        assert call_count > first_count

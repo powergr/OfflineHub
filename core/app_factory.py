@@ -1,7 +1,7 @@
 """
-app_factory — builds the single Flask app that replaces the old split
+app_factory: builds the single Flask app that replaces the old split
 between a customtkinter desktop app and a separate Flask portal. "/" and
-"/content"/"/tiles"/"/chat" are the public LAN-facing student portal;
+"/content"/"/tiles"/"/chat" are the public LAN-facing student portal.
 "/admin" is the password-gated setup/management UI.
 """
 
@@ -13,10 +13,12 @@ from flask import Flask, redirect, request, url_for
 
 from core.downloader import Downloader
 from core.hotspot import HotspotManager
+from core.i18n import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, translate
 from core.jobs import JobTracker
 from core.module_manager import ModuleManager
 from core.registry import ContentRegistry
 from core.tileserver import TileServer
+from core.usage_stats import UsageTracker
 from core.version import get_version
 
 # Resolve asset path whether running from source or frozen (Nuitka)
@@ -60,6 +62,7 @@ def create_app(config: dict, save_config) -> Flask:
         JOBS=JobTracker(),
         HOTSPOT_MGR=hotspot_mgr,
         TILE_SERVER=tile_server,
+        USAGE=UsageTracker(),
     )
 
     from core.blueprints.admin import bp as admin_bp
@@ -71,9 +74,24 @@ def create_app(config: dict, save_config) -> Flask:
     @app.context_processor
     def _inject_version():
         # Every template, portal and admin alike, can use {{ app_version }}
-        # without each route remembering to pass it — single source of truth
-        # is the VERSION file (core/version.py), not something re-typed here.
+        # without each route remembering to pass it. The single source of
+        # truth is the VERSION file (core/version.py), not something re-typed here.
         return {"app_version": get_version()}
+
+    @app.context_processor
+    def _inject_i18n():
+        # `t()` closes over the live `config` dict (the same object every
+        # route reads/writes via current_app.config["APP_CONFIG"]), so a
+        # language change in Settings takes effect on the very next
+        # request - no restart needed, since this re-reads config["language"]
+        # fresh on every single request rather than capturing it once here.
+        def t(key: str, **kwargs) -> str:
+            return translate(key, config.get("language", DEFAULT_LANGUAGE), **kwargs)
+        return {
+            "t": t,
+            "current_lang": config.get("language", DEFAULT_LANGUAGE),
+            "supported_languages": SUPPORTED_LANGUAGES,
+        }
 
     @app.before_request
     def _first_run_gate():

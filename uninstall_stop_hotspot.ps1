@@ -3,7 +3,7 @@
 # legacy netsh hosted network, regardless of which one (if either) is active.
 #
 # This exists because Windows Mobile Hotspot is a system-managed service
-# state, not tied to the app process's lifetime — confirmed directly: starting
+# state, not tied to the app process's lifetime. Confirmed directly: starting
 # tethering, then letting the controlling process exit without calling
 # StopTetheringAsync(), leaves the hotspot broadcasting indefinitely. Simply
 # killing OfflineHub.exe during uninstall is not enough on its own.

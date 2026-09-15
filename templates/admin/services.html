@@ -1,15 +1,15 @@
 {% extends "admin/base.html" %}
-{% block title %}Services{% endblock %}
+{% block title %}{{ t('nav.services') }}{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
-    <h1>🛠 Services</h1>
-    <p class="sub">Everything runs in-process — no separate servers to start or crash. "Unload" just frees the in-memory handle; it reopens automatically on next use.</p>
+    <h1>🛠 {{ t('nav.services') }}</h1>
+    <p class="sub">{{ t('services.subtitle') }}</p>
   </div>
 </div>
 
 {% if not modules %}
-  <div class="card"><p class="muted">No modules installed yet.</p></div>
+  <div class="card"><p class="muted">{{ t('services.none_installed') }}</p></div>
 {% else %}
   <div class="grid grid-narrow">
     {% for folder, data, status in modules %}
@@ -21,12 +21,12 @@
       <div class="muted">({{ data.type }})</div>
       <div class="mod-card-footer">
         <span class="badge {{ 'badge-error' if status == 'error' else ('badge-ready' if status == 'loaded' else 'badge-idle') }}">
-          {{ "⚠ error" if status == "error" else ("● loaded" if status == "loaded" else "○ not opened") }}
+          {{ "⚠ " + t('common.error') if status == "error" else ("● " + t('services.loaded') if status == "loaded" else "○ " + t('services.not_opened')) }}
         </span>
       </div>
       <form method="post" action="{{ url_for('admin.services_unload') }}">
         <input type="hidden" name="folder" value="{{ folder }}" />
-        <button type="submit" class="secondary">Unload</button>
+        <button type="submit" class="secondary">{{ t('services.unload') }}</button>
       </form>
     </div>
     {% endfor %}

@@ -1,5 +1,5 @@
 """
-build_llm_pack — assembles a standalone downloadable zip of one offline LLM
+build_llm_pack: assembles a standalone downloadable zip of one offline LLM
 module, for distribution (e.g. via Google Drive) separately from the
 Wikipedia/Gutenberg "companion pack".
 

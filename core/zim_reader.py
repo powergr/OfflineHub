@@ -1,5 +1,5 @@
 """
-ZimReader — reads a .zim file in-process via libzim, replacing the old
+ZimReader: reads a .zim file in-process via libzim, replacing the old
 kiwix-serve.exe subprocess. No port, no process, no vendor binary.
 
 libzim API used here (verified against libzim 3.13.0 on Windows/cp314):
@@ -12,11 +12,18 @@ libzim API used here (verified against libzim 3.13.0 on Windows/cp314):
   SuggestionSearcher(archive).suggest(text) -> SuggestionSearch (same .getResults shape)
 """
 
+import html
+import re
+
 from libzim.reader import Archive
 from libzim.search import Query, Searcher
 from libzim import SuggestionSearcher
 
 _MAX_REDIRECT_HOPS = 10
+
+_SCRIPT_OR_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.S | re.I)
+_TAG_RE = re.compile(r"<[^>]+>")
+_WHITESPACE_RE = re.compile(r"\s+")
 
 
 class ZimReader:
@@ -67,6 +74,30 @@ class ZimReader:
             entry = self._archive.get_entry_by_path(path)
             results.append((entry.title, path))
         return results
+
+    def get_text_snippet(self, path: str, max_chars: int = 600) -> str:
+        """
+        Plain-text excerpt of an entry's article (HTML tags stripped), for
+        use as retrieval-augmented context handed to the LLM - NOT for
+        actual article rendering, which uses resolve() directly and serves
+        the real HTML. A regex strip is good enough for a short excerpt and
+        avoids pulling in an HTML parser dependency just for this.
+        """
+        result = self.resolve(path)
+        if result is None:
+            return ""
+        content, mimetype = result
+        if "html" not in mimetype:
+            return ""
+        try:
+            text = content.decode("utf-8", errors="ignore")
+        except Exception:
+            return ""
+        text = _SCRIPT_OR_STYLE_RE.sub(" ", text)
+        text = _TAG_RE.sub(" ", text)
+        text = html.unescape(text)
+        text = _WHITESPACE_RE.sub(" ", text).strip()
+        return text[:max_chars]
 
     def suggest(self, query: str, count: int = 10) -> list[tuple[str, str]]:
         """Returns [(title, path), ...] for as-you-type suggestions."""

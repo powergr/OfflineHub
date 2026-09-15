@@ -1,5 +1,5 @@
 """
-TileServer — serves raster/vector tiles directly from .mbtiles (SQLite) files.
+TileServer: serves raster/vector tiles directly from .mbtiles (SQLite) files.
 
 MBTiles spec: https://github.com/mapbox/mbtiles-spec
 TMS y-axis convention: y_tms = (2^z - 1) - y_xyz

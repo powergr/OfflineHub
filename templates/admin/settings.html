@@ -1,54 +1,61 @@
 {% extends "admin/base.html" %}
-{% block title %}Settings{% endblock %}
+{% block title %}{{ t('nav.settings') }}{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
-    <h1>⚙️ Settings</h1>
-    <p class="sub">Portal, startup, and account settings.</p>
+    <h1>⚙️ {{ t('nav.settings') }}</h1>
+    <p class="sub">{{ t('settings.subtitle') }}</p>
   </div>
 </div>
 
 <form method="post">
   <div class="settings-layout">
     <div class="card">
-      <div class="section-title" style="margin-top:0">General</div>
-      <label for="portal_port">Portal Port</label>
+      <div class="section-title" style="margin-top:0">{{ t('settings.general') }}</div>
+      <label for="portal_port">{{ t('settings.portal_port') }}</label>
       <input type="number" id="portal_port" name="portal_port" value="{{ config.portal_port }}" />
 
       <label style="display:flex; align-items:center; gap:8px; margin-top:18px;">
         <input type="checkbox" name="autostart" {{ "checked" if config.autostart }} style="width:auto;" />
-        Start on Windows boot
+        {{ t('settings.start_on_boot') }}
       </label>
     </div>
 
     <div class="card">
-      <div class="section-title" style="margin-top:0">Change Admin Password</div>
-      <label for="new_password">New Password</label>
+      <div class="section-title" style="margin-top:0">{{ t('settings.language') }}</div>
+      <label for="language">{{ t('settings.display_language') }}</label>
+      <select id="language" name="language">
+        {% for code, label in supported_languages.items() %}
+        <option value="{{ code }}" {{ "selected" if code == current_lang }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <p class="muted" style="margin-top: 10px; font-size: 12px;">{{ t('settings.language_note') }}</p>
+    </div>
+
+    <div class="card">
+      <div class="section-title" style="margin-top:0">{{ t('settings.change_password') }}</div>
+      <label for="new_password">{{ t('setup.new_password') }}</label>
       <input type="password" id="new_password" name="new_password" />
-      <label for="confirm_password">Confirm</label>
+      <label for="confirm_password">{{ t('common.confirm') }}</label>
       <input type="password" id="confirm_password" name="confirm_password" />
     </div>
 
     <div class="card about-card">
-      <div class="section-title" style="margin-top:0">About</div>
+      <div class="section-title" style="margin-top:0">{{ t('settings.about') }}</div>
       <div class="version-badge" style="font-size:13px; padding:6px 14px;">v{{ app_version }}</div>
       <p class="muted" style="margin-top: 12px;">
-        Offline Knowledge Hub — Wikipedia, Gutenberg, offline maps, and a
-        small offline LLM assistant, served over your local Wi-Fi with no
-        internet required.
+        {{ t('settings.about_body') }}
       </p>
       <a href="{{ url_for('admin.diagnostics_export') }}" class="btn secondary" style="margin-top: 16px; display: inline-block; width: auto; text-decoration: none;">
-        📋 Export Diagnostics
+        📋 {{ t('settings.export_diagnostics') }}
       </a>
       <p class="muted" style="margin-top: 8px; font-size: 12px;">
-        Downloads a zip with the log file, settings (passwords excluded),
-        and installed-module list — handy to email whoever's helping you
-        troubleshoot.
+        {{ t('settings.export_diagnostics_body') }}
       </p>
     </div>
   </div>
 
-  <button type="submit" style="margin-top: 20px;">💾 Save All Settings</button>
+  <button type="submit" style="margin-top: 20px;">💾 {{ t('settings.save_all') }}</button>
 </form>
 
 <style>

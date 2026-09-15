@@ -63,12 +63,14 @@ if not exist "main.dist\OfflineHub.exe" (
 if exist "main.dist\onnxruntime-genai.dll" del "main.dist\onnxruntime-genai.dll"
 
 echo.
-echo Copying templates/, assets/, and VERSION into main.dist (none of these
-echo are Python imports, so Nuitka won't bundle them itself - and main.dist
-echo needs to be directly runnable for the smoke test below, before the
-echo installer would otherwise be the only thing that adds assets/)...
+echo Copying templates/, assets/, translations/, and VERSION into main.dist
+echo (none of these are Python imports, so Nuitka won't bundle them itself -
+echo and main.dist needs to be directly runnable for the smoke test below,
+echo before the installer would otherwise be the only thing that adds them)...
 xcopy /E /I /Y templates main.dist\templates >nul
 xcopy /E /I /Y assets main.dist\assets >nul
+xcopy /E /I /Y translations main.dist\translations >nul
+xcopy /E /I /Y core\data main.dist\core\data >nul
 copy /Y VERSION main.dist\VERSION >nul
 
 echo.

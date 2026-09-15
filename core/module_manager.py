@@ -1,5 +1,5 @@
 """
-ModuleManager — install, list, remove, and open content modules.
+ModuleManager: install, list, remove, and open content modules.
 
 No subprocesses. `zim` modules are opened in-process via ZimReader (libzim),
 `mbtiles` modules are read in-process by TileServer (sqlite), and `llm`
@@ -12,12 +12,38 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 from shutil import copy2, rmtree
 
 from core.registry import ContentRegistry
 from core.zim_reader import ZimReader
 
 logger = logging.getLogger(__name__)
+
+
+def _detect_mbtiles_format(path: str) -> str:
+    """
+    Reads the real "vector" vs "raster" split straight from the .mbtiles
+    file's own metadata table ("format": "pbf" for vector, "png"/"jpg"/
+    "webp" for raster - required by the MBTiles spec), instead of guessing
+    from the filename. Confirmed live to matter: the old filename-substring
+    guess ("vector" in the name -> vector, else raster) tagged real vector
+    files as raster whenever the filename didn't happen to contain the word
+    "vector," which made the portal request the wrong tile endpoint and
+    render a blank map with no error. Defaults to "raster" if the file has
+    no readable metadata table at all.
+    """
+    try:
+        conn = sqlite3.connect(path)
+        try:
+            row = conn.execute(
+                "SELECT value FROM metadata WHERE name = 'format'"
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return "raster"
+    return "vector" if row and row[0] == "pbf" else "raster"
 
 BASE_DIR    = r"C:\OfflineHub"
 MODULES_DIR = os.path.join(BASE_DIR, "modules")
@@ -95,7 +121,7 @@ class ModuleManager:
             "description": f"Imported automatically from {filename}",
         }
         if mod_type == "mbtiles":
-            manifest["format"] = "vector" if "vector" in lower_name else "raster"
+            manifest["format"] = _detect_mbtiles_format(dest_file)
 
         with open(os.path.join(dest_dir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
@@ -140,13 +166,24 @@ class ModuleManager:
             shutil.copytree(manifest_dir, dest)
             self.open_module(safe_name, data)
 
-    def install_from_download(self, key: str, item: dict, downloaded_path: str):
-        """A single-file catalogue download (ZIM) finished — install it as a module."""
+    def install_from_download(self, key: str, item: dict, downloaded_path: str, replace: bool = False):
+        """
+        A single-file catalogue download (ZIM) finished. Install it as a
+        module. `item["url"]` (the exact resolved download URL used) is
+        recorded as the manifest's "source_url" - the admin Modules page
+        compares this against the catalogue's CURRENT resolved URL to tell
+        whether a newer snapshot has since been published, without needing
+        to store a separate version number Kiwix doesn't expose directly.
+        `replace=True` (used by the "update" flow) removes an existing
+        install of the same key first instead of raising.
+        """
         mod_dir = os.path.join(MODULES_DIR, key)
         if os.path.exists(mod_dir):
-            raise FileExistsError(
-                f"'{key}' is already installed. Remove it first if you want to replace it."
-            )
+            if not replace:
+                raise FileExistsError(
+                    f"'{key}' is already installed. Remove it first if you want to replace it."
+                )
+            self.remove(mod_dir)
         os.makedirs(os.path.join(mod_dir, "content"), exist_ok=True)
 
         dest_file = os.path.join(mod_dir, "content", os.path.basename(downloaded_path))
@@ -158,19 +195,23 @@ class ModuleManager:
             "emoji":       item["emoji"],
             "type":        "zim",
             "description": item.get("description", ""),
+            "source_url":  item.get("url"),
         }
         with open(os.path.join(mod_dir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
 
         self.open_module(key, manifest)
 
-    def install_map_from_download(self, key: str, item: dict, downloaded_path: str):
-        """A single-file catalogue download (mbtiles map) finished - install it as a module."""
+    def install_map_from_download(self, key: str, item: dict, downloaded_path: str, replace: bool = False):
+        """A single-file catalogue download (mbtiles map) finished - install
+        it as a module. See install_from_download for "source_url"/"replace"."""
         mod_dir = os.path.join(MODULES_DIR, key)
         if os.path.exists(mod_dir):
-            raise FileExistsError(
-                f"'{key}' is already installed. Remove it first if you want to replace it."
-            )
+            if not replace:
+                raise FileExistsError(
+                    f"'{key}' is already installed. Remove it first if you want to replace it."
+                )
+            self.remove(mod_dir)
         os.makedirs(os.path.join(mod_dir, "content"), exist_ok=True)
 
         dest_file = os.path.join(mod_dir, "content", os.path.basename(downloaded_path))
@@ -181,16 +222,53 @@ class ModuleManager:
             "name":        item["name"],
             "emoji":       item["emoji"],
             "type":        "mbtiles",
-            "format":      "vector",
+            "format":      _detect_mbtiles_format(dest_file),
             "description": item.get("description", ""),
+            "source_url":  item.get("url"),
         }
         with open(os.path.join(mod_dir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
 
         self.open_module(key, manifest)
 
+    def install_extracted_map(self, iso: str, name: str, mbtiles_path: str) -> str:
+        """
+        A self-serve country map (core/map_extract.py's live, in-app
+        extraction from Protomaps' daily build) finished - install it as a
+        module. Uses a "country_<iso>" key, distinct from MAPS_CATALOGUE's
+        "map_<region>" keys, so extracting e.g. France here can never
+        collide with the existing hand-curated map_france pack. Returns the
+        installed folder key.
+        """
+        key = f"country_{iso.lower()}"
+        mod_dir = os.path.join(MODULES_DIR, key)
+        if os.path.exists(mod_dir):
+            raise FileExistsError(
+                f"'{key}' is already installed. Remove it first if you want to replace it."
+            )
+        os.makedirs(os.path.join(mod_dir, "content"), exist_ok=True)
+
+        dest_file = os.path.join(mod_dir, "content", f"{key}.mbtiles")
+        if mbtiles_path != dest_file:
+            shutil.move(mbtiles_path, dest_file)
+
+        manifest = {
+            "name":        f"Map: {name}",
+            "emoji":       "🗺️",
+            "type":        "mbtiles",
+            "format":      _detect_mbtiles_format(dest_file),
+            "description": f"Self-serve extract of {name} from Protomaps' daily basemap build.",
+            "source":      "protomaps_daily_build",
+            "iso":         iso,
+        }
+        with open(os.path.join(mod_dir, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+
+        self.open_module(key, manifest)
+        return key
+
     def install_llm_from_download(self, key: str, item: dict, downloaded_dir: str):
-        """A multi-file LLM model download finished — install it as an llm module."""
+        """A multi-file LLM model download finished. Install it as an llm module."""
         mod_dir = os.path.join(MODULES_DIR, key)
         if os.path.exists(mod_dir):
             raise FileExistsError(
@@ -267,7 +345,7 @@ class ModuleManager:
     def get_llm_engine(self, folder: str):
         """
         Return the cached LLMEngine for `folder`, loading it on first use.
-        Only one LLM model is kept resident at a time — loading a different
+        Only one LLM model is kept resident at a time. Loading a different
         one unloads whichever was previously loaded.
         """
         from core.llm_engine import LLMEngine  # imported lazily: heavy dependency

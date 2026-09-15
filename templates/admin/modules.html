@@ -1,25 +1,25 @@
 {% extends "admin/base.html" %}
-{% block title %}Modules{% endblock %}
+{% block title %}{{ t('nav.modules') }}{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
-    <h1>📦 Modules</h1>
-    <p class="sub">Install content and manage what's available on the student portal.</p>
+    <h1>📦 {{ t('nav.modules') }}</h1>
+    <p class="sub">{{ t('modules.subtitle') }}</p>
   </div>
 </div>
 
 <div class="tabs-nav" id="tabs-nav">
-  <button class="tab-btn" data-tab-btn="installed" onclick="showTab('installed')">Installed <span class="tab-count">{{ installed | length }}</span></button>
-  <button class="tab-btn" data-tab-btn="quickstart" onclick="showTab('quickstart')">📦 Quick Start</button>
-  <button class="tab-btn" data-tab-btn="llm" onclick="showTab('llm')">🤖 Offline Assistant</button>
-  <button class="tab-btn" data-tab-btn="maps" onclick="showTab('maps')">🗺️ Offline Maps</button>
-  <button class="tab-btn" data-tab-btn="discover" onclick="showTab('discover')">🔎 Discover More</button>
-  <button class="tab-btn" data-tab-btn="manual" onclick="showTab('manual')">➕ Manual Install</button>
+  <button class="tab-btn" data-tab-btn="installed" onclick="showTab('installed')">{{ t('modules.tab_installed') }} <span class="tab-count">{{ installed | length }}</span></button>
+  <button class="tab-btn" data-tab-btn="quickstart" onclick="showTab('quickstart')">📦 {{ t('download_panel.tab_quickstart') }}</button>
+  <button class="tab-btn" data-tab-btn="llm" onclick="showTab('llm')">🤖 {{ t('download_panel.tab_llm') }}</button>
+  <button class="tab-btn" data-tab-btn="maps" onclick="showTab('maps')">🗺️ {{ t('download_panel.tab_maps') }}</button>
+  <button class="tab-btn" data-tab-btn="discover" onclick="showTab('discover')">🔎 {{ t('download_panel.tab_discover') }}</button>
+  <button class="tab-btn" data-tab-btn="manual" onclick="showTab('manual')">➕ {{ t('modules.tab_manual') }}</button>
 </div>
 
 <section class="tab-panel" data-tab="installed">
 {% if not installed %}
-  <div class="card"><p class="muted">No modules installed yet — pick a tab above to get started.</p></div>
+  <div class="card"><p class="muted">{{ t('modules.none_installed') }}</p></div>
 {% else %}
   <div class="grid grid-narrow">
     {% for folder, data, status in installed %}
@@ -31,14 +31,24 @@
       <p class="dl-desc">{{ data.description }}</p>
       <div class="mod-card-footer">
         <span class="badge {{ 'badge-error' if status == 'error' else 'badge-ready' }}">
-          {{ "⚠ error" if status == "error" else "● ready" }}
+          {{ "⚠ " + t('common.error') if status == "error" else "● " + t('common.ready') }}
         </span>
         <span class="muted">{{ data.type }}</span>
       </div>
+      <div class="muted" style="font-size: 12px; margin-top: 4px;" title="{{ t('modules.opens_tooltip') }}">
+        👁 {{ t('modules.opens_count', count=(usage_counts | default({})).get(folder, 0)) }}
+      </div>
+      {% if folder in (content_updates | default([])) %}
+      <div class="update-row" id="update-row-{{ folder }}">
+        <span class="badge badge-idle">🔄 {{ t('modules.newer_version_available') }}</span>
+        <button type="button" class="secondary" onclick="startContentUpdate('{{ folder }}')" id="update-btn-{{ folder }}">{{ t('common.update') }}</button>
+      </div>
+      <div class="progress" id="update-progress-{{ folder }}" style="display:none"><div></div></div>
+      {% endif %}
       <form method="post" action="{{ url_for('admin.modules_remove') }}"
-            onsubmit="return confirm('Remove {{ data.name }}? This deletes its files.');">
+            onsubmit="return confirm('{{ t('modules.confirm_remove', name=data.name) }}');">
         <input type="hidden" name="folder" value="{{ folder }}" />
-        <button type="submit" class="danger">Remove</button>
+        <button type="submit" class="danger">{{ t('common.remove') }}</button>
       </form>
     </div>
     {% endfor %}
@@ -49,19 +59,19 @@
 {% include "admin/_download_panel.html" %}
 
 <section class="tab-panel" data-tab="manual">
-<div class="section-title" style="margin-top:0">Manual Install</div>
+<div class="section-title" style="margin-top:0">{{ t('modules.manual_install') }}</div>
 <div class="card">
-  <p class="muted">A .zim / .mbtiles file already on this PC, or a legacy .zip module (manifest.json + content/).</p>
+  <p class="muted">{{ t('modules.manual_install_desc') }}</p>
   <form method="post" action="{{ url_for('admin.modules_install') }}" enctype="multipart/form-data" class="manual-install-form">
     <div>
-      <label for="filepath">File path on this PC</label>
+      <label for="filepath">{{ t('modules.filepath_label') }}</label>
       <input type="text" id="filepath" name="filepath" placeholder="C:\Downloads\my_library.zim" />
     </div>
     <div>
-      <label for="file">…or upload a file (works from another device on the hotspot)</label>
+      <label for="file">{{ t('modules.upload_label') }}</label>
       <input type="file" id="file" name="file" accept=".zim,.mbtiles,.zip" />
     </div>
-    <button type="submit">Install</button>
+    <button type="submit">{{ t('common.install') }}</button>
   </form>
 </div>
 </section>
@@ -71,29 +81,49 @@
   .mod-card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
   .mod-card > form { margin-top: 14px; }
   .mod-card > form > button { width: 100%; }
+  .update-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+  .update-row button { width: auto; padding: 6px 14px; font-size: 12.5px; }
   .manual-install-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 16px; align-items: end; }
   .manual-install-form button { height: 42px; }
   @media (max-width: 760px) { .manual-install-form { grid-template-columns: 1fr; } }
-
-  .tabs-nav {
-    display: flex; gap: 2px; border-bottom: 1px solid var(--border);
-    margin-bottom: 24px; overflow-x: auto;
-  }
-  .tab-btn {
-    padding: 11px 16px; background: none; border: none; border-bottom: 2px solid transparent;
-    color: var(--muted); font-weight: 600; font-size: 13.5px; cursor: pointer;
-    white-space: nowrap; border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  }
-  .tab-btn:hover { color: var(--text); background: var(--surface2); }
-  .tab-btn.active { color: var(--text); border-bottom-color: var(--accent2); }
-  .tab-count {
-    display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px;
-    border-radius: 9px; background: var(--surface3); font-size: 11px; font-weight: 700;
-  }
-  .tab-panel[hidden] { display: none; }
 </style>
 
 <script>
+  const T_UPDATING = "{{ t('modules.updating') | e }}";
+  const T_UPDATE = "{{ t('common.update') | e }}";
+  const T_UPDATE_FAILED = "{{ t('modules.update_failed') | e }}";
+
+  function startContentUpdate(folder) {
+    const btn = document.getElementById(`update-btn-${folder}`);
+    const bar = document.getElementById(`update-progress-${folder}`);
+    btn.disabled = true;
+    btn.textContent = T_UPDATING;
+    bar.style.display = "block";
+
+    fetch("/admin/downloads/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: folder }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) { btn.disabled = false; btn.textContent = T_UPDATE; alert(data.error); return; }
+        pollJob(
+          data.job_id,
+          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
+          (job) => {
+            if (job.success) {
+              location.reload();  // refreshes the card's size/status and clears the badge
+            } else {
+              btn.disabled = false;
+              btn.textContent = T_UPDATE;
+              alert(job.error || T_UPDATE_FAILED);
+            }
+          }
+        );
+      });
+  }
+
   function showTab(name) {
     document.querySelectorAll(".tab-panel").forEach((el) => { el.hidden = el.dataset.tab !== name; });
     document.querySelectorAll(".tab-btn").forEach((el) => { el.classList.toggle("active", el.dataset.tabBtn === name); });

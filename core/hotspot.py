@@ -1,5 +1,5 @@
 """
-HotspotManager — creates and controls a Windows Wi-Fi hotspot.
+HotspotManager: creates and controls a Windows Wi-Fi hotspot.
 
 Strategy:
   1. Try the Windows 10/11 WinRT Mobile Hotspot API via PowerShell.
@@ -17,7 +17,7 @@ import subprocess
 from typing import Tuple
 
 # All console-app subprocesses (powershell.exe, netsh.exe, arp.exe) must be
-# started with CREATE_NO_WINDOW — otherwise, since this app itself runs
+# started with CREATE_NO_WINDOW. Otherwise, since this app itself runs
 # windowless (no console of its own), Windows pops up a brand-new visible
 # console window for every single one of them. Confirmed live: without this,
 # a single "Start Hotspot" click that falls through WinRT -> netsh can pop
@@ -26,23 +26,23 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW
 
 # Windows Mobile Hotspot / ICS has used this subnet by long-standing default
 # for years, regardless of whether it was started via the WinRT API or the
-# legacy netsh hosted network — confirmed live on this machine (192.168.137.1).
+# legacy netsh hosted network. Confirmed live on this machine (192.168.137.1).
 _HOTSPOT_SUBNET_PREFIX = "192.168.137."
 
 # Loads the WinRT tethering types and the reflection-based Await helpers
 # PowerShell needs to call their async (IAsyncAction / IAsyncOperation<T>)
-# methods. Verified live against this exact machine's PowerShell 5.1 — the
+# methods. Verified live against this exact machine's PowerShell 5.1. The
 # previous version of this script referenced the WindowsRuntimeSystemExtensions
 # type under the wrong namespace (System.Runtime.InteropServices.WindowsRuntime
 # instead of just System), never loaded the System.Runtime.WindowsRuntime
 # assembly that type actually lives in, and never explicitly loaded the
 # Windows.Networking.Connectivity / Windows.Networking.NetworkOperators WinRT
-# namespaces — each WinRT namespace needs its own explicit
+# namespaces. Each WinRT namespace needs its own explicit
 # "[Type,Namespace,ContentType=WindowsRuntime]" load before its types are
 # usable, loading one unrelated namespace (as the old script did) does not
 # make others available. All three mistakes made every WinRT call fail
-# silently, so the app always fell through to the legacy netsh path — which
-# many modern Wi-Fi drivers (this machine's Realtek RTL8852BE included, per
+# silently, so the app always fell through to the legacy netsh path. Many
+# modern Wi-Fi drivers (this machine's Realtek RTL8852BE included, per
 # `netsh wlan show drivers` -> "Hosted network supported: No") have dropped
 # support for entirely, hence the "group or resource is not in the correct
 # state" error. Fixing this so WinRT actually works removes the need to fall
@@ -149,7 +149,7 @@ class HotspotManager:
 
         On a machine with both an internet uplink (Ethernet/Wi-Fi station)
         and an active hotspot, those are two different adapters on two
-        different subnets — confirmed live: Ethernet at 172.20.147.29,
+        different subnets. Confirmed live: Ethernet at 172.20.147.29,
         hotspot AP at 192.168.137.1. The naive "connect a UDP socket to
         8.8.8.8 and read the source address" trick always returns whichever
         adapter has the default route (the internet uplink), which is
@@ -283,9 +283,9 @@ try {
     def _try_netsh(self, ssid: str, pw: str) -> Tuple[bool, str]:
         """
         Legacy hosted network via netsh. Only relevant on older Wi-Fi drivers
-        that still implement it — many current drivers report "Hosted
+        that still implement it. Many current drivers report "Hosted
         network supported: No" (check with `netsh wlan show drivers`), and
-        no amount of adapter resetting here will change that; it's a driver
+        no amount of adapter resetting here will change that. It's a driver
         capability, not app or Windows-service state.
         """
         # Step 1: stop any existing hosted network, then reset the virtual adapter
@@ -331,7 +331,7 @@ Get-NetAdapter -IncludeHidden |
                 return False, (
                     f"{err}\n\n"
                     "Tip: run 'netsh wlan show drivers' and check \"Hosted "
-                    "network supported\" — many current Wi-Fi drivers report "
+                    "network supported\". Many current Wi-Fi drivers report "
                     "No, meaning this legacy method can never work here "
                     "regardless of adapter state. Mobile Hotspot (above) is "
                     "the supported path on those drivers."

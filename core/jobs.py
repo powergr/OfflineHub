@@ -1,5 +1,5 @@
 """
-JobTracker — tracks background download/install progress for the admin UI.
+JobTracker: tracks background download/install progress for the admin UI.
 
 Each job's progress/done callbacks are created per-call via new_job()/
 progress_cb(job_id)/done_cb(job_id, ...), so job_id is always a bound

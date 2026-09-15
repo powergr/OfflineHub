@@ -1,16 +1,46 @@
 import json
 import os
+import sqlite3
 import zipfile
 
 import pytest
 
+import core.module_manager as module_manager
 from core.module_manager import ModuleManager
 from core.registry import ContentRegistry
+
+
+def _make_mbtiles(path: str, fmt: str):
+    """Writes a minimal real .mbtiles (sqlite) file with a metadata table
+    declaring the given format ("pbf" for vector, "png"/"jpg" for raster) -
+    the real thing _detect_mbtiles_format() reads, unlike a plain bytes file."""
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE metadata (name TEXT, value TEXT)")
+    conn.execute("INSERT INTO metadata VALUES ('format', ?)", (fmt,))
+    conn.commit()
+    conn.close()
 
 
 @pytest.fixture
 def mgr():
     return ModuleManager(ContentRegistry())
+
+
+class _FakeZimReader:
+    """Stands in for the real libzim-backed ZimReader - install_from_download
+    always writes a "type": "zim" manifest, and open_module() actually opens
+    it via libzim, which real test fixture bytes aren't a valid file for.
+    The existing zip-install test dodges this by using type "mbtiles"
+    instead; install_from_download has no such option, so these tests
+    monkeypatch ZimReader itself instead."""
+
+    def __init__(self, path):
+        self.path = path
+
+
+@pytest.fixture
+def fake_zim(monkeypatch):
+    monkeypatch.setattr(module_manager, "ZimReader", _FakeZimReader)
 
 
 def _make_zip(tmp_path, name, entries: dict[str, bytes]) -> str:
@@ -33,8 +63,28 @@ def test_install_raw_mbtiles_file(isolated_dirs, mgr, tmp_path):
     mod_dir = isolated_dirs["modules"] / "London"
     manifest = json.loads((mod_dir / "manifest.json").read_text())
     assert manifest["type"] == "mbtiles"
-    assert manifest["format"] == "raster"  # "vector" isn't in the filename
+    assert manifest["format"] == "raster"  # not a real sqlite file, so this is the safe default
     assert (mod_dir / "content" / "London.mbtiles").exists()
+
+
+def test_install_raw_mbtiles_file_detects_real_vector_format_regardless_of_filename():
+    """Regression test: a real vector .mbtiles used to get tagged "raster"
+    whenever its filename didn't happen to contain the word "vector," which
+    made the portal request the wrong tile endpoint and render a blank map.
+    The manifest's format must come from the file's own metadata table."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "some_map.mbtiles")
+        _make_mbtiles(path, "pbf")
+        assert module_manager._detect_mbtiles_format(path) == "vector"
+
+
+def test_detect_mbtiles_format_raster_from_real_metadata():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "vector_named_but_actually_raster.mbtiles")
+        _make_mbtiles(path, "png")
+        assert module_manager._detect_mbtiles_format(path) == "raster"
 
 
 def test_install_raw_file_rejects_unsupported_extension(isolated_dirs, mgr, tmp_path):
@@ -129,6 +179,78 @@ def test_install_from_zip_rejects_absolute_path_member(isolated_dirs, mgr, tmp_p
         mgr.install_from_zip(zip_path)
 
 
+# ── install_from_download / install_map_from_download (source_url + replace) ──
+
+def test_install_from_download_records_source_url(isolated_dirs, fake_zim, mgr, tmp_path):
+    downloaded = tmp_path / "wikipedia_en_mini.zim"
+    downloaded.write_bytes(b"fake zim data")
+    item = {"name": "Wikipedia (English, Mini)", "emoji": "📚",
+            "description": "...", "url": "https://example.test/wikipedia_2026-01.zim"}
+
+    mgr.install_from_download("wikipedia_en_mini", item, str(downloaded))
+
+    manifest = json.loads((isolated_dirs["modules"] / "wikipedia_en_mini" / "manifest.json").read_text())
+    assert manifest["source_url"] == "https://example.test/wikipedia_2026-01.zim"
+
+
+def test_install_from_download_rejects_duplicate_without_replace(isolated_dirs, fake_zim, mgr, tmp_path):
+    downloaded = tmp_path / "a.zim"
+    downloaded.write_bytes(b"data")
+    item = {"name": "X", "emoji": "x", "description": "", "url": "https://example.test/a.zim"}
+    mgr.install_from_download("mykey", item, str(downloaded))
+
+    with pytest.raises(FileExistsError):
+        mgr.install_from_download("mykey", item, str(downloaded))
+
+
+def test_install_from_download_replace_true_swaps_content_and_source_url(isolated_dirs, fake_zim, mgr, tmp_path):
+    old_file = tmp_path / "old.zim"
+    old_file.write_bytes(b"old content")
+    old_item = {"name": "X", "emoji": "x", "description": "", "url": "https://example.test/old.zim"}
+    mgr.install_from_download("mykey", old_item, str(old_file))
+
+    new_file = tmp_path / "new.zim"
+    new_file.write_bytes(b"new content, much bigger than before")
+    new_item = {"name": "X", "emoji": "x", "description": "", "url": "https://example.test/new.zim"}
+    mgr.install_from_download("mykey", new_item, str(new_file), replace=True)
+
+    mod_dir = isolated_dirs["modules"] / "mykey"
+    manifest = json.loads((mod_dir / "manifest.json").read_text())
+    assert manifest["source_url"] == "https://example.test/new.zim"
+    assert not (mod_dir / "content" / "old.zim").exists()
+    assert (mod_dir / "content" / "new.zim").read_bytes() == b"new content, much bigger than before"
+
+
+def test_install_map_from_download_records_source_url(isolated_dirs, mgr, tmp_path):
+    downloaded = tmp_path / "map_uk.mbtiles"
+    downloaded.write_bytes(b"fake tiles")
+    item = {"name": "Map: UK", "emoji": "🗺️", "description": "...",
+            "url": "https://example.test/map_uk.mbtiles"}
+
+    mgr.install_map_from_download("map_uk", item, str(downloaded))
+
+    manifest = json.loads((isolated_dirs["modules"] / "map_uk" / "manifest.json").read_text())
+    assert manifest["source_url"] == "https://example.test/map_uk.mbtiles"
+    assert manifest["type"] == "mbtiles"
+
+
+def test_install_map_from_download_replace_true_swaps_content(isolated_dirs, mgr, tmp_path):
+    old_file = tmp_path / "old.mbtiles"
+    old_file.write_bytes(b"old tiles")
+    old_item = {"name": "Map", "emoji": "x", "description": "", "url": "https://example.test/old.mbtiles"}
+    mgr.install_map_from_download("mapkey", old_item, str(old_file))
+
+    new_file = tmp_path / "new.mbtiles"
+    new_file.write_bytes(b"new tiles")
+    new_item = {"name": "Map", "emoji": "x", "description": "", "url": "https://example.test/new.mbtiles"}
+    mgr.install_map_from_download("mapkey", new_item, str(new_file), replace=True)
+
+    mod_dir = isolated_dirs["modules"] / "mapkey"
+    manifest = json.loads((mod_dir / "manifest.json").read_text())
+    assert manifest["source_url"] == "https://example.test/new.mbtiles"
+    assert not (mod_dir / "content" / "old.mbtiles").exists()
+
+
 # ── list_modules ──────────────────────────────────────────────────────────────
 
 def test_list_modules_skips_corrupt_manifest(isolated_dirs, mgr):
@@ -149,6 +271,54 @@ def test_list_modules_empty_when_dir_missing(isolated_dirs, mgr, monkeypatch):
     import core.module_manager as module_manager
     monkeypatch.setattr(module_manager, "MODULES_DIR", str(isolated_dirs["modules"] / "nope"))
     assert mgr.list_modules() == []
+
+
+# ── install_extracted_map (self-serve country maps) ─────────────────────────
+
+def test_install_extracted_map_uses_country_prefixed_key(isolated_dirs, mgr, tmp_path):
+    src = tmp_path / "country_fr.mbtiles"
+    _make_mbtiles(str(src), "pbf")
+
+    key = mgr.install_extracted_map("FR", "France", str(src))
+
+    assert key == "country_fr"
+    mod_dir = isolated_dirs["modules"] / "country_fr"
+    manifest = json.loads((mod_dir / "manifest.json").read_text())
+    assert manifest["type"] == "mbtiles"
+    assert manifest["format"] == "vector"
+    assert manifest["iso"] == "FR"
+    assert manifest["source"] == "protomaps_daily_build"
+    assert (mod_dir / "content" / "country_fr.mbtiles").exists()
+
+
+def test_install_extracted_map_does_not_collide_with_curated_map_france(isolated_dirs, mgr, tmp_path):
+    """Regression guard: the hand-curated MAPS_CATALOGUE key for France is
+    "map_france" - a self-serve extraction of France must land at a
+    distinct "country_fr" key, never overwriting or colliding with it."""
+    curated = tmp_path / "map_france.mbtiles"
+    curated.write_bytes(b"curated pack")
+    mgr.install_map_from_download(
+        "map_france", {"name": "Map: France", "emoji": "x", "description": "", "url": "https://example.test/x"},
+        str(curated),
+    )
+
+    extracted = tmp_path / "self_serve_fr.mbtiles"
+    _make_mbtiles(str(extracted), "pbf")
+    mgr.install_extracted_map("FR", "France", str(extracted))
+
+    assert (isolated_dirs["modules"] / "map_france").exists()
+    assert (isolated_dirs["modules"] / "country_fr").exists()
+
+
+def test_install_extracted_map_refuses_when_already_installed(isolated_dirs, mgr, tmp_path):
+    src = tmp_path / "country_fr.mbtiles"
+    _make_mbtiles(str(src), "pbf")
+    mgr.install_extracted_map("FR", "France", str(src))
+
+    src2 = tmp_path / "country_fr_again.mbtiles"
+    _make_mbtiles(str(src2), "pbf")
+    with pytest.raises(FileExistsError):
+        mgr.install_extracted_map("FR", "France", str(src2))
 
 
 # ── remove ────────────────────────────────────────────────────────────────────
