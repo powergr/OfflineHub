@@ -94,7 +94,7 @@ Actions (`.github/workflows/test.yml`) runs this suite on every push and PR.
 ## How Content Works
 
 | Module type | Engine                           | Notes                                                                                    |
-| ----------- | --------------------------------- | ---------------------------------------------------------------------------------------- |
+| ----------- | -------------------------------- | ---------------------------------------------------------------------------------------- |
 | `zim`       | `libzim` (in-process)            | Wikipedia, Gutenberg, Khan Academy, or any Kiwix ZIM. No subprocess, no port per module. |
 | `mbtiles`   | sqlite (in-process)              | Offline vector/raster maps, served straight from the `.mbtiles` file.                    |
 | `llm`       | `onnxruntime-genai` (in-process) | A small offline chat model. Model weights download like content, not as a vendor binary. |
@@ -119,18 +119,25 @@ current Kiwix library only publishes a single ~180GB "all" ZIM for it. No
 small subject-specific version exists anymore. Use the search box if you
 still want it. The real size is shown before you download.
 
-The Offline Maps tab also has a "Search for a Country" box. Unlike the six
-curated regional packs above, this extracts a chosen country's tiles live
-from Protomaps' free daily global basemap build, straight into a local
-`.mbtiles` file (`core/map_extract.py`). No vendor binary is involved: the
-`pmtiles` Python package's `Reader` accepts any byte-range-capable source,
-so the extraction is done with plain HTTP Range requests instead of the
-`go-pmtiles` CLI a build-time-only dev tool
-(`tools/build_map_packs.py`) uses to build the curated packs. Very large
-countries automatically get a lower max zoom to keep the download a
-reasonable size. The shown size is an estimate, not an exact figure. Real
-byte size varies a lot by how much of a country's bounding box is empty
-ocean versus dense urban data, unlike Kiwix's own exact reported sizes.
+The Offline Maps tab also has a "Search for a Country" box. Unlike the
+six curated regional packs above, this extracts a chosen country's
+tiles live. The source is Protomaps' free daily global basemap build
+(`core/map_extract.py`). It writes straight into a local `.mbtiles`
+file. No vendor binary is involved. The `pmtiles` Python package's
+`Reader` accepts any byte-range-capable source. So the extraction uses
+plain HTTP Range requests instead. It avoids the `go-pmtiles` CLI a
+build-time-only dev tool (`tools/build_map_packs.py`) uses for the
+curated packs. Very large countries automatically get a lower max
+zoom. That keeps the download a reasonable size.
+
+The shown size is an estimate, not an exact figure. Real byte size
+varies by how much of a country's box is empty ocean. Dense
+urban data pushes it the other way. Kiwix's own reported sizes
+are exact, by contrast. The time estimate is more reliable. It comes
+from a real throughput measurement against the live source server, not
+a guess. A large country can still take 20-30+ minutes, since that
+server rate-limits regardless of concurrency. Any download, including
+a country map, can be cancelled mid-way from its own progress bar.
 
 Once a module is installed, its Quick Start / Offline Assistant button
 changes. It switches to a disabled "✓ Installed" state instead of offering
@@ -306,6 +313,80 @@ source.
 Full history isn't tracked in a separate file. This is a running summary,
 newest first. Bump [`VERSION`](VERSION) when the next set of changes ships.
 
+## 0.3.0
+
+- Added self-serve country map downloads. The Offline Maps tab now has a
+  "Search for a Country" box. It covers all 173 countries in a bundled
+  dataset, not just the six curated regions. `core/map_extract.py`
+  extracts a chosen country's tiles live from Protomaps' free daily
+  global basemap build. It writes straight into a local `.mbtiles` file.
+  It uses plain HTTP Range requests instead. That avoids the
+  `go-pmtiles` Go binary the maintainer-only build script uses. It keeps
+  the "no vendor binaries" principle intact.
+- Fixed two real bugs in that feature. Both were found from an actual
+  admin report of a broken-looking map. A real hole showed up in the
+  middle of Cyprus, centered on Nicosia. The frontend's map source never
+  declared its own max zoom. MapLibre assumed data existed all the way
+  to z22. It rendered nothing once you zoomed past what a module
+  actually had. Separately, the extraction zoom ceiling (z12) was too
+  shallow for the POI and road-label layers. They could never show
+  anything. Both fixed. `/api/modules` now reports each module's real max zoom.
+  The ceiling is raised to z15, the live build's own real maximum.
+- Fixed the app being able to hang indefinitely on "Quit." That could
+  also let an uninstall catch it still running and delete modules
+  unevenly. Root-caused from the app's own log file. `TileServer` caches
+  one open `.mbtiles` connection per map for the life of the process.
+  The function to close them existed but was never called anywhere.
+  Fixed. Quitting now has a 25-second watchdog that force-exits the
+  process no matter what else hangs. "Quit" is now guaranteed to
+  actually end the process.
+- Fixed "keep modules" on uninstall not actually keeping everything.
+  Two separate, unrelated bugs caused it, found from two separate real
+  reports:
+  - `manifest.json` is a small file nothing holds open, so it was being
+    deleted. A module's much bigger content file survived only because
+    it happened to be locked open. A module could have real data on
+    disk but be invisible to the app. It used to just skip a folder
+    with no manifest. `core/module_manager.py` now reconstructs and
+    saves a manifest from whatever content is actually there.
+  - Separately, and more fundamentally: Inno Setup evaluates
+    `[UninstallDelete]`'s `Check:` function _before_ `InitializeUninstall()`
+    even runs. Confirmed with an instrumented test build of the real
+    installer. The modules-keep prompt's answer was never actually seen
+    in time. The whole folder was deleted regardless of what the admin
+    chose. `installer.iss` now deletes modules explicitly at the
+    `usPostUninstall` step instead. That step reliably runs after the
+    prompt's answer is recorded.
+- Fixed a 30-minute country map extraction being able to die on one
+  network hiccup. A retry afterward used to fail with a Windows
+  "file in use" error. A long extraction fires thousands of individual
+  HTTP requests, with no retry logic at all. One transient timeout used
+  to kill the whole job. The destination file's connection was also
+  only ever closed on the success path. That leaked a lock a retry then
+  tripped over. Both fixed, with regression tests that reproduce the
+  exact failure-then-retry sequence.
+- Country map downloads are also faster, and no longer needlessly
+  risky. Measured live against the real source server at several
+  concurrency levels. Throughput stayed flat at ~9-10 tiles/sec no
+  matter how many concurrent connections were used. That's a
+  server-side limit, not something more connections can fix. Higher
+  concurrency just made every request slower for no benefit. That's
+  very likely what caused the timeout above in the first place.
+  Concurrency is lowered accordingly. A country's real extraction time
+  now shows as an honest estimate first. A large country can still
+  legitimately take 20-30+ minutes on a free public server.
+- Added the ability to cancel any in-progress download, not just map
+  extraction. Every download card in the admin panel now has a working
+  Cancel button. That covers Quick Start, Offline Assistant, curated
+  maps, Discover search results, and country maps.
+- Restyled the Manual Install tab's file picker button. It now matches
+  the rest of the app instead of the browser's unstyled native control.
+- Added a spinner to the chat UI while waiting for the offline
+  assistant's reply. A slow first token no longer looks like a stall.
+- Removed em dashes and rewrote long sentences across every admin and
+  portal screen. Also across all translation files and this README.
+  Every sentence is now capped at 15 words.
+
 ## 0.2.5
 
 - Trimmed the installer from ~46MB to ~44MB (main.dist from 185MB to 170MB
@@ -383,7 +464,7 @@ newest first. Bump [`VERSION`](VERSION) when the next set of changes ships.
   lives in. It also never explicitly loaded the WinRT namespaces it needs.
   So it always failed silently and fell through to `netsh`. Many current
   drivers have dropped support for `netsh` entirely. Running `netsh wlan
-  show drivers` on them returns `Hosted network supported: No`. Fixed and
+show drivers` on them returns `Hosted network supported: No`. Fixed and
   confirmed by actually starting and stopping a real hotspot through it.
   Every subprocess call in `core/hotspot.py` also now runs with
   `CREATE_NO_WINDOW`. That flag is what was popping the console windows.
@@ -421,7 +502,7 @@ newest first. Bump [`VERSION`](VERSION) when the next set of changes ships.
   if the module folder already exists. They no longer attempt the
   overwrite at all.
 
-**0.2.0**: the vendor-binary-free rewrite
+## 0.2.0
 
 - Removed `vendor/kiwix-serve.exe` and `vendor/Kolibri.exe` entirely,
   along with all Kolibri support. Kolibri's Windows distribution bundles a
