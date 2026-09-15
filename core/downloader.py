@@ -508,11 +508,12 @@ class Downloader:
 
     def download(
         self,
-        url:         str,
-        dest:        str,
-        progress_cb: Callable[[float, float], None] | None = None,
-        done_cb:     Callable[[bool, str], None] | None    = None,
-        checksum:    str | None                            = None,
+        url:          str,
+        dest:         str,
+        progress_cb:  Callable[[float, float], None] | None = None,
+        done_cb:      Callable[[bool, str], None] | None    = None,
+        checksum:     str | None                            = None,
+        cancel_event=None,
     ):
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         part_file = dest + ".part"
@@ -537,6 +538,16 @@ class Downloader:
 
                 with open(part_file, mode) as f:
                     for chunk in r.iter_content(chunk_size=1024 * 256):
+                        if cancel_event is not None and cancel_event.is_set():
+                            # The .part file is left in place, same as any
+                            # other interrupted download - a later retry of
+                            # the same URL/dest resumes from here rather
+                            # than starting over, exactly like the existing
+                            # disk-full/network-drop failure path already
+                            # does below.
+                            if done_cb:
+                                done_cb(False, dest, "Cancelled")
+                            return
                         if not chunk:
                             continue
                         f.write(chunk)
@@ -575,6 +586,7 @@ class Downloader:
         dest_dir:    str,
         progress_cb: Callable[[float, float], None] | None = None,
         done_cb:     Callable[[bool, str], None] | None    = None,
+        cancel_event=None,
     ):
         """
         Sequentially downloads several files into `dest_dir` (used for LLM
@@ -585,6 +597,11 @@ class Downloader:
         total_files = len(files)
 
         for i, f in enumerate(files):
+            if cancel_event is not None and cancel_event.is_set():
+                if done_cb:
+                    done_cb(False, dest_dir, "Cancelled")
+                return
+
             file_failed = []
             file_error = []
 
@@ -598,7 +615,7 @@ class Downloader:
                     file_failed.append(True)
                     file_error.append(error)
 
-            self.download(f["url"], f["dest"], file_progress, file_done, f.get("checksum"))
+            self.download(f["url"], f["dest"], file_progress, file_done, f.get("checksum"), cancel_event)
 
             if file_failed:
                 if done_cb:

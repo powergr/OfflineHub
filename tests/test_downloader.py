@@ -1,6 +1,7 @@
 import errno
 import hashlib
 import os
+import threading
 from unittest.mock import Mock, patch
 
 import pytest
@@ -225,6 +226,82 @@ def test_download_disk_full_gives_friendly_message_and_keeps_part_file(downloade
     assert "disk space" in results["error"].lower()
     assert os.path.exists(dest + ".part")
     assert open(dest + ".part", "rb").read() == b"partial-data"
+
+
+def test_download_cancelled_before_starting_never_writes_dest_and_reports_cancelled(downloader, tmp_path):
+    dest = str(tmp_path / "file.zim")
+    results = {}
+    cancel_event = threading.Event()
+    cancel_event.set()  # already cancelled before the first chunk
+
+    def fake_get(url, headers=None, stream=None, timeout=None):
+        return FakeResponse(b"x" * 1000, {"Content-Length": "1000"})
+
+    with patch("core.downloader.requests.get", side_effect=fake_get):
+        downloader.download(
+            "http://example.test/file.zim", dest,
+            done_cb=lambda success, path, error=None: results.update(success=success, error=error),
+            cancel_event=cancel_event,
+        )
+
+    assert results == {"success": False, "error": "Cancelled"}
+    assert not os.path.exists(dest)
+
+
+def test_download_cancelled_mid_stream_keeps_partial_part_file_for_resume(downloader, tmp_path):
+    """Cancelling isn't treated as "this is broken" the way a checksum
+    mismatch is - the .part file is deliberately left in place (same as any
+    other interrupted download) so retrying the same download later resumes
+    instead of starting over."""
+    dest = str(tmp_path / "file.zim")
+    results = {}
+    cancel_event = threading.Event()
+
+    class CancelAfterFirstChunkResponse(FakeResponse):
+        def iter_content(self, chunk_size):
+            yield self.content_bytes[:4]
+            cancel_event.set()  # simulates the admin clicking Cancel mid-download
+            yield self.content_bytes[4:8]  # download() must never write this
+
+    def fake_get(url, headers=None, stream=None, timeout=None):
+        return CancelAfterFirstChunkResponse(b"01234567", {"Content-Length": "8"})
+
+    with patch("core.downloader.requests.get", side_effect=fake_get):
+        downloader.download(
+            "http://example.test/file.zim", dest,
+            done_cb=lambda success, path, error=None: results.update(success=success, error=error),
+            cancel_event=cancel_event,
+        )
+
+    assert results == {"success": False, "error": "Cancelled"}
+    assert not os.path.exists(dest)
+    assert open(dest + ".part", "rb").read() == b"0123"  # only the pre-cancel chunk
+
+
+def test_download_set_checks_cancel_event_before_each_file(downloader, tmp_path):
+    calls = []
+    cancel_event = threading.Event()
+
+    def fake_get(url, headers=None, stream=None, timeout=None):
+        calls.append(url)
+        cancel_event.set()  # cancel takes effect starting with the *next* file
+        return FakeResponse(b"data", {"Content-Length": "4"})
+
+    files = [
+        {"url": "http://example.test/1", "dest": str(tmp_path / "1.bin")},
+        {"url": "http://example.test/2", "dest": str(tmp_path / "2.bin")},
+    ]
+    results = {}
+
+    with patch("core.downloader.requests.get", side_effect=fake_get):
+        downloader.download_set(
+            files, str(tmp_path),
+            done_cb=lambda success, path, error=None: results.update(success=success, error=error),
+            cancel_event=cancel_event,
+        )
+
+    assert calls == ["http://example.test/1"]  # never started file 2
+    assert results == {"success": False, "error": "Cancelled"}
 
 
 def test_friendly_error_disk_full():

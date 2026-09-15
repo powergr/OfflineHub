@@ -69,7 +69,14 @@
     </div>
     <div>
       <label for="file">{{ t('modules.upload_label') }}</label>
-      <input type="file" id="file" name="file" accept=".zim,.mbtiles,.zip" />
+      <div class="file-upload-row">
+        <span class="file-upload-btn-wrap">
+          <input type="file" id="file" name="file" accept=".zim,.mbtiles,.zip"
+                 onchange="document.getElementById('file-name').textContent = this.files[0] ? this.files[0].name : {{ t('modules.no_file_chosen') | tojson }}" />
+          <span class="btn secondary" aria-hidden="true">{{ t('modules.choose_file') }}</span>
+        </span>
+        <span id="file-name" class="muted">{{ t('modules.no_file_chosen') }}</span>
+      </div>
     </div>
     <button type="submit">{{ t('common.install') }}</button>
   </form>
@@ -86,6 +93,21 @@
   .manual-install-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 16px; align-items: end; }
   .manual-install-form button { height: 42px; }
   @media (max-width: 760px) { .manual-install-form { grid-template-columns: 1fr; } }
+
+  /* Native <input type=file> renders as an OS-styled grey button that
+     never matches the app's own .btn look, no matter what CSS targets the
+     input itself - browsers refuse to themeable that part. Standard fix:
+     keep the real input functional (real file picker, real keyboard
+     focus) but invisible, stacked exactly over a normal .btn-styled span
+     that's what actually shows. */
+  .file-upload-row { display: flex; align-items: center; gap: 12px; height: 42px; }
+  .file-upload-btn-wrap { position: relative; display: inline-flex; height: 100%; }
+  .file-upload-btn-wrap input[type=file] {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: pointer; margin: 0;
+  }
+  .file-upload-btn-wrap .btn { height: 100%; box-sizing: border-box; }
+  #file-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 
 <script>

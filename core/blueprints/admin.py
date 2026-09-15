@@ -333,6 +333,7 @@ def download_quickstart():
     threading.Thread(
         target=_downloader().download,
         args=(item["url"], dest, jobs.progress_cb(job_id), jobs.done_cb(job_id, on_success)),
+        kwargs={"cancel_event": jobs.cancel_event(job_id)},
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id})
@@ -376,9 +377,15 @@ def download_bundle():
     # thread easily outlives it (a bundle download can run for minutes).
     lang = _cfg().get("language", DEFAULT_LANGUAGE)
 
+    cancel_event = jobs.cancel_event(job_id)
+
     def run():
         total = len(resolved)
         for i, (key, item) in enumerate(resolved):
+            if cancel_event.is_set():
+                jobs.done_cb(job_id)(False, "", "Cancelled")
+                return
+
             dest = os.path.join(DOWNLOAD_DIR, f"{key}.zim")
             outcome = {}
 
@@ -390,7 +397,7 @@ def download_bundle():
                 outcome["success"] = success
                 outcome["error"] = error
 
-            downloader.download(item["url"], dest, progress_cb, done_cb)
+            downloader.download(item["url"], dest, progress_cb, done_cb, cancel_event=cancel_event)
 
             if not outcome.get("success"):
                 fallback = translate("flash.failed_to_download", lang, name=item["name"])
@@ -460,6 +467,7 @@ def download_update():
     threading.Thread(
         target=_downloader().download,
         args=(item["url"], dest, jobs.progress_cb(job_id), jobs.done_cb(job_id, on_success)),
+        kwargs={"cancel_event": jobs.cancel_event(job_id)},
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id})
@@ -504,6 +512,7 @@ def download_custom():
     threading.Thread(
         target=_downloader().download,
         args=(url, dest, jobs.progress_cb(job_id), jobs.done_cb(job_id, on_success)),
+        kwargs={"cancel_event": jobs.cancel_event(job_id)},
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id, "key": key})
@@ -530,6 +539,7 @@ def download_llm():
     threading.Thread(
         target=_downloader().download_set,
         args=(files, dest_dir, jobs.progress_cb(job_id), jobs.done_cb(job_id, on_success)),
+        kwargs={"cancel_event": jobs.cancel_event(job_id)},
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id})
@@ -557,6 +567,7 @@ def download_map():
     threading.Thread(
         target=_downloader().download,
         args=(item["url"], dest, jobs.progress_cb(job_id), jobs.done_cb(job_id, on_success)),
+        kwargs={"cancel_event": jobs.cancel_event(job_id)},
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id})
@@ -572,7 +583,7 @@ def download_countries():
     whole list is ~20KB), unlike the ZIM "Discover" search which hits a
     live API per query.
     """
-    from core.map_extract import estimate_size_mb, load_countries, pick_maxzoom
+    from core.map_extract import estimate_seconds, estimate_size_mb, load_countries, pick_maxzoom
 
     installed = {folder for folder, _ in _module_mgr().list_modules()}
     countries = []
@@ -584,6 +595,11 @@ def download_countries():
             "maxzoom": maxzoom,
             "tile_count": tile_count,
             "est_size_mb": round(estimate_size_mb(tile_count)),
+            # Measured live against the real source server, not guessed -
+            # see CONCURRENCY's comment in core/map_extract.py. Shown so an
+            # admin can see a large country is genuinely a 20-30+ minute
+            # wait before committing to it, not a stuck/broken download.
+            "est_minutes": round(estimate_seconds(tile_count) / 60, 1),
             "installed": f"country_{iso.lower()}" in installed,
         })
     return jsonify({"countries": countries})
@@ -599,7 +615,7 @@ def download_map_country():
     this file already uses - see download_quickstart above for the
     reference shape this follows.
     """
-    from core.map_extract import extract_country, load_countries
+    from core.map_extract import ExtractionCancelled, extract_country, load_countries
 
     iso = request.form.get("iso") or (request.get_json(silent=True) or {}).get("iso")
     countries = load_countries()
@@ -626,7 +642,10 @@ def download_map_country():
     # passed straight to Thread like the other download routes.
     def run():
         try:
-            extract_country(iso, dest, jobs.progress_cb(job_id))
+            extract_country(iso, dest, jobs.progress_cb(job_id), cancel_event=jobs.cancel_event(job_id))
+        except ExtractionCancelled:
+            jobs.done_cb(job_id)(False, "", "Cancelled")
+            return
         except Exception as e:
             jobs.done_cb(job_id)(False, "", str(e))
             return
@@ -642,6 +661,22 @@ def download_status(job_id):
     if job is None:
         return jsonify({"error": _t("flash.unknown_job")}), 404
     return jsonify(job)
+
+
+@bp.route("/downloads/<job_id>/cancel", methods=["POST"])
+def download_cancel(job_id):
+    """
+    Asks a running background download/extraction to stop. Best-effort and
+    not instant: the background thread only notices at its next check (a
+    download checks every 256KB chunk, an extraction between tiles), and
+    up to CONCURRENCY already-in-flight tile fetches still have to finish
+    naturally either way - but the job is marked "cancelled" immediately
+    here so the admin UI can reflect that right away rather than waiting
+    for the background thread to catch up.
+    """
+    if not _jobs().cancel(job_id):
+        return jsonify({"error": _t("flash.unknown_job")}), 404
+    return ("", 204)
 
 
 # ── Hotspot ───────────────────────────────────────────────────────────────────

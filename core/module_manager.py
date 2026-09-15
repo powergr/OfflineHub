@@ -64,14 +64,38 @@ class ModuleManager:
         if not os.path.isdir(MODULES_DIR):
             return results
         for folder in sorted(os.listdir(MODULES_DIR)):
-            manifest_path = os.path.join(MODULES_DIR, folder, "manifest.json")
+            mod_dir = os.path.join(MODULES_DIR, folder)
+            if not os.path.isdir(mod_dir):
+                continue
+            manifest_path = os.path.join(mod_dir, "manifest.json")
             if os.path.exists(manifest_path):
                 try:
                     with open(manifest_path, encoding="utf-8") as f:
                         data = json.load(f)
                     results.append((folder, data))
+                    continue
                 except Exception as e:
-                    logger.warning("Skipping module '%s': invalid manifest.json (%s)", folder, e)
+                    logger.warning(
+                        "Module '%s' has an unreadable manifest.json (%s) - "
+                        "attempting to reconstruct it from its actual content", folder, e
+                    )
+            # No manifest.json at all, or one that failed to parse. Confirmed
+            # live to happen for a real reason, not just a theoretical edge
+            # case: an uninstall that caught the app with a module's
+            # .mbtiles connection still open deleted manifest.json (a tiny
+            # file, never held open) while the locked .mbtiles data file
+            # itself survived. Without this, a folder full of real,
+            # perfectly good content just silently vanishes from every
+            # listing - which is exactly what a reinstalled app showed the
+            # admin: two real map files sitting right there on disk, and
+            # "no maps installed" in the UI. Reconstruct + persist a
+            # manifest from whatever content is actually still there,
+            # rather than losing the module a second time.
+            data = _reconstruct_manifest(folder, mod_dir)
+            if data is not None:
+                results.append((folder, data))
+            else:
+                logger.warning("Skipping module '%s': no manifest.json and no recognizable content", folder)
         return results
 
     def get_manifest(self, folder: str) -> dict | None:
@@ -393,3 +417,80 @@ def _safe_extract(zip_ref, dest_dir: str):
 
 def _safe_name(raw: str) -> str:
     return "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in raw).strip()
+
+
+def _reconstruct_manifest(folder: str, mod_dir: str) -> dict | None:
+    """
+    Rebuilds a manifest.json from whatever real content is still sitting in
+    `mod_dir`, and persists it so this only has to happen once per folder.
+    Returns None if there's nothing recognizable to recover (an empty or
+    genuinely unrelated folder), in which case the caller still skips it.
+
+    Prefers real, known-good data over a guess wherever one is available:
+    - A "country_<iso>" folder (core/map_extract.py's self-serve extractor)
+      gets its exact original name/description/emoji reconstructed from the
+      bundled country list and _detect_mbtiles_format(), matching
+      ModuleManager.install_extracted_map() exactly, not approximated.
+    - A folder whose key matches a live catalogue entry (Kiwix ZIM, curated
+      map pack, or LLM model - core/downloader.py) gets that entry's real
+      name/emoji/description back, the same way it would look if installed
+      fresh today.
+    - Anything else falls back to a title-cased folder name, same heuristic
+      install_from_raw_file() already uses for a manually-dropped-in file.
+    """
+    mbtiles = glob.glob(os.path.join(mod_dir, "**", "*.mbtiles"), recursive=True)
+    zims = glob.glob(os.path.join(mod_dir, "**", "*.zim"), recursive=True)
+    has_llm_content = os.path.isdir(os.path.join(mod_dir, "content")) and bool(
+        os.listdir(os.path.join(mod_dir, "content"))
+    ) and not mbtiles and not zims
+    if not mbtiles and not zims and not has_llm_content:
+        return None
+
+    if folder.startswith("country_") and mbtiles:
+        from core.map_extract import load_countries
+        iso = folder[len("country_"):].upper()
+        try:
+            country_name = load_countries()[iso][0]
+        except (FileNotFoundError, KeyError):
+            country_name = folder[len("country_"):].replace("_", " ").title()
+        manifest = {
+            "name":        f"Map: {country_name}",
+            "emoji":       "🗺️",
+            "type":        "mbtiles",
+            "format":      _detect_mbtiles_format(mbtiles[0]),
+            "description": f"Self-serve extract of {country_name} from Protomaps' daily basemap build.",
+            "source":      "protomaps_daily_build",
+            "iso":         iso.lower(),
+        }
+    else:
+        from core.downloader import CATALOGUE, LLM_CATALOGUE, MAPS_CATALOGUE
+        catalogue_item = CATALOGUE.get(folder) or MAPS_CATALOGUE.get(folder) or LLM_CATALOGUE.get(folder)
+        name = catalogue_item["name"] if catalogue_item else folder.replace("_", " ").title()
+        description = catalogue_item.get("description", "") if catalogue_item else (
+            "Recovered module: manifest.json was missing or unreadable, "
+            "rebuilt from the content still on disk."
+        )
+        if mbtiles:
+            manifest = {
+                "name": name, "emoji": catalogue_item["emoji"] if catalogue_item else "🗺️",
+                "type": "mbtiles", "format": _detect_mbtiles_format(mbtiles[0]), "description": description,
+            }
+        elif zims:
+            manifest = {
+                "name": name, "emoji": catalogue_item["emoji"] if catalogue_item else "📚",
+                "type": "zim", "description": description,
+            }
+        else:
+            manifest = {
+                "name": name, "emoji": catalogue_item["emoji"] if catalogue_item else "🤖",
+                "type": "llm", "description": description,
+            }
+
+    try:
+        with open(os.path.join(mod_dir, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+        logger.warning("Reconstructed manifest.json for module '%s' from its content", folder)
+    except Exception:
+        logger.exception("Could not persist reconstructed manifest.json for '%s'", folder)
+
+    return manifest

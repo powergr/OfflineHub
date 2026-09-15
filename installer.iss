@@ -77,17 +77,25 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM OfflineHub.exe /T"; Flags: r
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Offline Knowledge Hub"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveFirewallRule"
 
 [UninstallDelete]
-; Downloaded modules (Wikipedia, maps, the offline assistant, etc.) can be
-; tens of GB, so they're only removed if the admin says yes to the prompt
-; in [Code] below. That prompt is skipped entirely (defaults to deleting)
-; when the modules folder is already empty, so nobody sees a pointless
-; question with nothing to actually keep.
-Type: filesandordirs; Name: "{app}\modules"; Check: ShouldDeleteModules
-; Everything else generated at runtime is still deleted unconditionally:
-; partial/staged downloads, the log directory, and the small JSON state
-; files Inno's automatic [Files]-based cleanup doesn't know about. Add any
-; future generated file here too - this replaced a "{app}\*" catch-all, so
-; nothing here is swept up automatically anymore.
+; "{app}\modules" is deliberately NOT listed here - see
+; CurUninstallStepChanged in [Code] below for why, and do not add it back
+; with a Check: parameter. Confirmed live with an instrumented test build:
+; Inno evaluates a [UninstallDelete] entry's Check: function too early to
+; see anything InitializeUninstall() computes - specifically, BEFORE
+; InitializeUninstall() itself has run. A Check function reading KeepModules
+; (set inside InitializeUninstall() from the admin's actual Yes/No answer)
+; therefore always saw it at its uninitialized default (False) and deleted
+; the whole modules folder unconditionally, regardless of what the admin
+; answered - a real report of "chose Keep, modules folder is gone anyway"
+; traced directly to this. Deleting modules explicitly in code instead, at
+; the usPostUninstall step (which reliably runs after InitializeUninstall
+; has already finished), sidesteps the ordering problem entirely.
+;
+; Everything else generated at runtime is still deleted unconditionally
+; here: partial/staged downloads, the log directory, and the small JSON
+; state files Inno's automatic [Files]-based cleanup doesn't know about.
+; Add any future generated file here too - this replaced a "{app}\*"
+; catch-all, so nothing here is swept up automatically anymore.
 Type: filesandordirs; Name: "{app}\downloads"
 Type: filesandordirs; Name: "{app}\logs"
 Type: files; Name: "{app}\config.json"
@@ -133,7 +141,24 @@ begin
   end;
 end;
 
-function ShouldDeleteModules(): Boolean;
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
-  Result := not KeepModules;
+  // Deletes the modules folder explicitly here rather than through the
+  // UninstallDelete section's Check: mechanism - see the comment on that
+  // section above for why that doesn't work. usPostUninstall reliably
+  // runs after InitializeUninstall() has already set KeepModules from the
+  // admin's real answer, unlike a Check: function.
+  if CurUninstallStep = usPostUninstall then
+  begin
+    if not KeepModules then
+    begin
+      DelTree(ExpandConstant('{app}\modules'), True, True, True);
+      // The app folder would otherwise survive as an empty leftover in
+      // this branch: dirifempty above already ran earlier in the
+      // process, before this DelTree emptied it out, so it never got a
+      // second chance to notice.
+      if not DirHasFiles(ExpandConstant('{app}')) then
+        RemoveDir(ExpandConstant('{app}'));
+    end;
+  end;
 end;

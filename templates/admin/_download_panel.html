@@ -14,6 +14,7 @@
   <div class="dl-meta">{% if bundle_size %}{{ (bundle_size / 1073741824) | round(2) }} GB {{ t('download_panel.total') }}{% else %}{{ t('download_panel.size_unknown') }}{% endif %}</div>
   <div class="progress" id="bundle-progress" style="display:none"><div></div></div>
   <button type="button" class="btn" onclick="startBundle()" id="bundle-btn">{{ t('download_panel.bundle_button') }}</button>
+  <button type="button" class="btn secondary" id="bundle-cancel" style="display:none">{{ t('common.cancel') }}</button>
 </div>
 {% endif %}
 <div class="grid" id="quickstart-list">
@@ -33,6 +34,7 @@
       <button class="btn secondary" disabled>✓ {{ t('common.installed') }}</button>
     {% else %}
       <button type="button" class="btn" onclick="startQuickstart('{{ key }}')" id="qs-btn-{{ key }}">{{ t('common.download') }}</button>
+      <button type="button" class="btn secondary" id="qs-cancel-{{ key }}" style="display:none">{{ t('common.cancel') }}</button>
     {% endif %}
   </div>
   {% endfor %}
@@ -56,6 +58,7 @@
       <button class="btn secondary" disabled>✓ {{ t('common.installed') }}</button>
     {% else %}
       <button type="button" class="btn" onclick="startLLM('{{ key }}')" id="llm-btn-{{ key }}">{{ t('common.download') }}</button>
+      <button type="button" class="btn secondary" id="llm-cancel-{{ key }}" style="display:none">{{ t('common.cancel') }}</button>
     {% endif %}
   </div>
   {% endfor %}
@@ -79,6 +82,7 @@
       <button class="btn secondary" disabled>✓ {{ t('common.installed') }}</button>
     {% else %}
       <button type="button" class="btn" onclick="startMap('{{ key }}')" id="map-btn-{{ key }}">{{ t('common.download') }}</button>
+      <button type="button" class="btn secondary" id="map-cancel-{{ key }}" style="display:none">{{ t('common.cancel') }}</button>
     {% endif %}
   </div>
   {% endfor %}
@@ -119,6 +123,8 @@
 <script>
   const T_INSTALLED = "✓ {{ t('common.installed') | e }}";
   const T_RETRY = "{{ t('common.retry') | e }}";
+  const T_CANCEL = "{{ t('common.cancel') | e }}";
+  const T_CANCELLING = "{{ t('download_panel.cancelling') | e }}";
   const T_DOWNLOAD_FAILED = "{{ t('download_panel.download_failed') | e }}";
   const T_BUNDLE_FAILED = "{{ t('download_panel.bundle_failed') | e }}";
   const T_SEARCHING = "{{ t('download_panel.searching') | e }}";
@@ -136,9 +142,37 @@
     poll();
   }
 
+  // Wraps pollJob() with the "Cancel" button every download card now has:
+  // shows it while the job runs, wires it to POST the cancel endpoint, and
+  // hides it again once the job is done (success, failure, or cancelled -
+  // onDone still gets a chance to tell those apart via job.cancelled before
+  // this fires, since this runs it after that callback). Shared by every
+  // startX() function below instead of repeating this in six places.
+  function startTrackedJob(jobId, { bar, cancelBtn, onDone }) {
+    if (cancelBtn) {
+      cancelBtn.style.display = "inline-block";
+      cancelBtn.disabled = false;
+      cancelBtn.textContent = T_CANCEL;
+      cancelBtn.onclick = () => {
+        cancelBtn.disabled = true;
+        cancelBtn.textContent = T_CANCELLING;
+        fetch(`/admin/downloads/${jobId}/cancel`, { method: "POST" });
+      };
+    }
+    pollJob(
+      jobId,
+      (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
+      (job) => {
+        if (cancelBtn) cancelBtn.style.display = "none";
+        onDone(job);
+      }
+    );
+  }
+
   function startBundle() {
     const btn = document.getElementById("bundle-btn");
     const bar = document.getElementById("bundle-progress");
+    const cancelBtn = document.getElementById("bundle-cancel");
     btn.disabled = true;
     bar.style.display = "block";
 
@@ -146,25 +180,25 @@
       .then((r) => r.json())
       .then((data) => {
         if (data.error) { btn.disabled = false; alert(data.error); return; }
-        pollJob(
-          data.job_id,
-          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
-          (job) => {
+        startTrackedJob(data.job_id, {
+          bar, cancelBtn,
+          onDone: (job) => {
             if (job.success) {
               btn.textContent = T_INSTALLED;
               location.reload();  // refreshes card states across the whole panel
             } else {
               btn.disabled = false;
-              alert(job.error || T_BUNDLE_FAILED);
+              if (!job.cancelled) alert(job.error || T_BUNDLE_FAILED);
             }
           }
-        );
+        });
       });
   }
 
   function startQuickstart(key) {
     const btn = document.getElementById(`qs-btn-${key}`);
     const bar = document.getElementById(`qs-progress-${key}`);
+    const cancelBtn = document.getElementById(`qs-cancel-${key}`);
     btn.disabled = true;
     bar.style.display = "block";
 
@@ -176,20 +210,24 @@
       .then((r) => r.json())
       .then((data) => {
         if (data.error) { btn.disabled = false; btn.textContent = T_RETRY; alert(data.error); return; }
-        pollJob(
-          data.job_id,
-          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
-          (job) => {
+        startTrackedJob(data.job_id, {
+          bar, cancelBtn,
+          onDone: (job) => {
             if (job.success) { btn.textContent = T_INSTALLED; }
-            else { btn.disabled = false; btn.textContent = T_RETRY; alert(job.error || T_DOWNLOAD_FAILED); }
+            else {
+              btn.disabled = false;
+              btn.textContent = T_RETRY;
+              if (!job.cancelled) alert(job.error || T_DOWNLOAD_FAILED);
+            }
           }
-        );
+        });
       });
   }
 
   function startLLM(key) {
     const btn = document.getElementById(`llm-btn-${key}`);
     const bar = document.getElementById(`llm-progress-${key}`);
+    const cancelBtn = document.getElementById(`llm-cancel-${key}`);
     btn.disabled = true;
     bar.style.display = "block";
 
@@ -201,20 +239,24 @@
       .then((r) => r.json())
       .then((data) => {
         if (data.error) { btn.disabled = false; btn.textContent = T_RETRY; alert(data.error); return; }
-        pollJob(
-          data.job_id,
-          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
-          (job) => {
+        startTrackedJob(data.job_id, {
+          bar, cancelBtn,
+          onDone: (job) => {
             if (job.success) { btn.textContent = T_INSTALLED; }
-            else { btn.disabled = false; btn.textContent = T_RETRY; alert(job.error || T_DOWNLOAD_FAILED); }
+            else {
+              btn.disabled = false;
+              btn.textContent = T_RETRY;
+              if (!job.cancelled) alert(job.error || T_DOWNLOAD_FAILED);
+            }
           }
-        );
+        });
       });
   }
 
   function startMap(key) {
     const btn = document.getElementById(`map-btn-${key}`);
     const bar = document.getElementById(`map-progress-${key}`);
+    const cancelBtn = document.getElementById(`map-cancel-${key}`);
     btn.disabled = true;
     bar.style.display = "block";
 
@@ -226,14 +268,17 @@
       .then((r) => r.json())
       .then((data) => {
         if (data.error) { btn.disabled = false; btn.textContent = T_RETRY; alert(data.error); return; }
-        pollJob(
-          data.job_id,
-          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
-          (job) => {
+        startTrackedJob(data.job_id, {
+          bar, cancelBtn,
+          onDone: (job) => {
             if (job.success) { btn.textContent = T_INSTALLED; }
-            else { btn.disabled = false; btn.textContent = T_RETRY; alert(job.error || T_DOWNLOAD_FAILED); }
+            else {
+              btn.disabled = false;
+              btn.textContent = T_RETRY;
+              if (!job.cancelled) alert(job.error || T_DOWNLOAD_FAILED);
+            }
           }
-        );
+        });
       });
   }
 
@@ -267,7 +312,8 @@
             <p class="dl-desc">${item.summary || ""}</p>
             <div class="dl-meta">${item.language} · ${item.article_count.toLocaleString()} ${T_ARTICLES} · ${gb} GB</div>
             <div class="progress" id="sr-progress-${i}" style="display:none"><div></div></div>
-            <button type="button" class="btn" id="sr-btn-${i}" onclick='startCustom(${i}, ${JSON.stringify(item)})'>{{ t('common.download') | e }}</button>`;
+            <button type="button" class="btn" id="sr-btn-${i}" onclick='startCustom(${i}, ${JSON.stringify(item)})'>{{ t('common.download') | e }}</button>
+            <button type="button" class="btn secondary" id="sr-cancel-${i}" style="display:none">${T_CANCEL}</button>`;
           results.appendChild(card);
         });
       });
@@ -277,6 +323,7 @@
   function startCustom(i, item) {
     const btn = document.getElementById(`sr-btn-${i}`);
     const bar = document.getElementById(`sr-progress-${i}`);
+    const cancelBtn = document.getElementById(`sr-cancel-${i}`);
     btn.disabled = true;
     bar.style.display = "block";
 
@@ -288,14 +335,17 @@
       .then((r) => r.json())
       .then((data) => {
         if (data.error) { btn.disabled = false; btn.textContent = T_RETRY; alert(data.error); return; }
-        pollJob(
-          data.job_id,
-          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
-          (job) => {
+        startTrackedJob(data.job_id, {
+          bar, cancelBtn,
+          onDone: (job) => {
             if (job.success) { btn.textContent = T_INSTALLED; }
-            else { btn.disabled = false; btn.textContent = T_RETRY; alert(job.error || T_DOWNLOAD_FAILED); }
+            else {
+              btn.disabled = false;
+              btn.textContent = T_RETRY;
+              if (!job.cancelled) alert(job.error || T_DOWNLOAD_FAILED);
+            }
           }
-        );
+        });
       });
   }
 
@@ -329,9 +379,11 @@
     matches.forEach((c) => {
       const card = document.createElement("div");
       card.className = "card dl-card";
-      const meta = `~${c.est_size_mb} MB · {{ t('download_panel.country_zoom_label') | e }} ${c.maxzoom}`;
+      const etaLabel = c.est_minutes < 1 ? "< 1 min" : `~${c.est_minutes} min`;
+      const meta = `~${c.est_size_mb} MB · {{ t('download_panel.country_zoom_label') | e }} ${c.maxzoom} · ${etaLabel}`;
       const installedBtn = `<button class="btn secondary" disabled>✓ {{ t('common.installed') | e }}</button>`;
-      const downloadBtn = `<button type="button" class="btn" id="country-btn-${c.iso}" onclick="startCountryMap('${c.iso}')">{{ t('common.download') | e }}</button>`;
+      const downloadBtn = `<button type="button" class="btn" id="country-btn-${c.iso}" onclick="startCountryMap('${c.iso}')">{{ t('common.download') | e }}</button>
+        <button type="button" class="btn secondary" id="country-cancel-${c.iso}" style="display:none">${T_CANCEL}</button>`;
       card.innerHTML = `
         <div class="dl-card-head">
           <span class="dl-emoji">🗺️</span>
@@ -348,6 +400,7 @@
   function startCountryMap(iso) {
     const btn = document.getElementById(`country-btn-${iso}`);
     const bar = document.getElementById(`country-progress-${iso}`);
+    const cancelBtn = document.getElementById(`country-cancel-${iso}`);
     btn.disabled = true;
     bar.style.display = "block";
 
@@ -359,14 +412,17 @@
       .then((r) => r.json())
       .then((data) => {
         if (data.error) { btn.disabled = false; btn.textContent = T_RETRY; alert(data.error); return; }
-        pollJob(
-          data.job_id,
-          (job) => { bar.firstElementChild.style.width = job.pct + "%"; },
-          (job) => {
+        startTrackedJob(data.job_id, {
+          bar, cancelBtn,
+          onDone: (job) => {
             if (job.success) { btn.textContent = T_INSTALLED; }
-            else { btn.disabled = false; btn.textContent = T_RETRY; alert(job.error || T_DOWNLOAD_FAILED); }
+            else {
+              btn.disabled = false;
+              btn.textContent = T_RETRY;
+              if (!job.cancelled) alert(job.error || T_DOWNLOAD_FAILED);
+            }
           }
-        );
+        });
       });
   }
 </script>

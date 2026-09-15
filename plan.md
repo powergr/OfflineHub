@@ -231,4 +231,111 @@ from memory or an old list.
     modules from this incident are gone from disk and were not
     recoverable - they need to be redownloaded from the Modules page.
 
+27. ✅ **A reinstall showed "no maps installed" even though both map
+    files were still on disk.** Done. Direct fallout from item 26's
+    uninstall bug: `manifest.json` is a tiny file nothing ever holds
+    open, so it was deleted cleanly for every module, while the two
+    `.mbtiles` data files survived only because `TileServer` had them
+    locked open. `core/module_manager.py`'s `list_modules()` used to
+    silently skip any folder without a readable manifest, so two real,
+    intact map files just disappeared from the app.
+
+    Now self-heals: a module folder with real content but no manifest
+    gets one reconstructed and persisted automatically, using the real
+    country name for a self-serve map or the real catalogue entry's
+    name/description for anything else, not a guessed one. Used this
+    same logic to recover the admin's actual two modules on the spot
+    ("Map: Cyprus", "Map: United Kingdom", both correctly detected as
+    vector). Full test suite passes.
+
+28. ✅ **A 30-minute country map download died on one network hiccup,
+    then a retry failed with a locked-file error.** Done. A real Cyprus
+    extraction hit `HTTPSConnectionPool: Read timed out` after 30
+    minutes, and retrying hit `WinError 32: The process cannot access
+    the file`. Two real bugs in `core/map_extract.py`: a long extraction
+    fires thousands of individual HTTP range requests against a public
+    server with no retry at all, so a single transient timeout aborted
+    the entire job; and the destination sqlite connection was only ever
+    closed on the success path, so that same failed attempt left the
+    file locked, and the retry's own cleanup of it failed.
+
+    Fixed both: each HTTP request now retries with backoff, a tile that
+    still fails after retries is tracked and skipped rather than killing
+    the whole extraction (unless too many fail, which still raises
+    instead of silently installing a mostly-blank map), and the
+    connection is always closed and the partial file removed on any
+    failure, so a retry starts clean. Verified with new tests that
+    reproduce the exact failure-then-retry sequence, not just the happy
+    path; 156-test suite passes.
+
+29. ✅ **Choosing "keep" on the modules prompt during uninstall deleted
+    the whole app folder anyway.** Done. Found from a real report right
+    after item 26/27 shipped - the fix for the *previous* uninstall bug
+    still didn't actually honor "keep." Root-caused with an instrumented
+    test build of the installer script (real Inno Setup, not guessed):
+    it proved `[UninstallDelete]`'s `Check:` function is evaluated
+    *before* `InitializeUninstall()` even runs, so `ShouldDeleteModules()`
+    always read `KeepModules` at its uninitialized default (false) and
+    always deleted the modules folder, regardless of what the admin
+    actually answered. The prompt itself worked; the answer just came
+    too late for Inno to see it.
+
+    Fixed by moving the deletion out of `[UninstallDelete]`'s Check
+    mechanism entirely: `installer.iss` now deletes the modules folder
+    explicitly from a `CurUninstallStepChanged` handler at the
+    `usPostUninstall` step, which reliably runs after
+    `InitializeUninstall()` has already recorded the real answer.
+    Verified against the actual compiled uninstaller end to end, not
+    just read through: an instrumented test install proved the old code
+    called `ShouldDeleteModules()` and got a delete decision *before*
+    `InitializeUninstall()` ever ran, then confirmed the fix keeps real
+    module content and the app folder itself on "keep," and still
+    removes everything on "delete" - both against a real install/
+    uninstall cycle, not a simulation.
+
+30. ✅ **Country map downloads were needlessly slow, and there was no way
+    to cancel one.** Done. An admin asked why a ~168MB Cyprus extraction
+    took so long, and pointed out there's no cancel button for any
+    download.
+
+    Measured live against the real Protomaps server, not guessed: a real
+    680-tile extraction timed at concurrency 4, 8, 16, 48, and 96 showed
+    throughput flat at ~9-10 tiles/sec across *all* of them - a server-
+    side rate limit, not something more client concurrency can beat -
+    while per-request latency got dramatically worse at high concurrency
+    (mean 1.08s at 16 threads vs. 5.14s, max 18.1s, at 96 threads) for
+    zero throughput benefit. That latency is very likely what actually
+    caused item 28's real read-timeout failure: `CONCURRENCY` was 48,
+    eating almost all of the request timeout's margin for nothing in
+    return. Lowered to 16 (the fastest of everything tested), and the
+    per-request timeout padded from 20s to 30s for extra safety margin.
+    At the real ~10 tiles/sec ceiling, a large country's 20-30+ minute
+    extraction time is a hard limit from the free public source server,
+    not something fixable client-side - now shown to the admin as an
+    honest ETA (`est_minutes`) before they commit to it, instead of just
+    a size estimate.
+
+    Added cancellation throughout, not just for map extraction: every
+    background job (`core/jobs.py`'s `JobTracker`) now carries its own
+    `threading.Event`, checked periodically by `Downloader.download()`/
+    `download_set()` (every 256KB chunk, and between files in a set) and
+    by `map_extract.extract_country()` (between tiles, cancelling
+    whatever hasn't started yet and cleaning up the partial file - there's
+    no resume support for extraction the way a plain HTTP download has).
+    A new `/admin/downloads/<job_id>/cancel` route (session-gated like
+    every other admin route) marks a job cancelled immediately so the UI
+    can reflect that before the background thread catches up. Every
+    download card in the admin
+    UI (`templates/admin/_download_panel.html`) now has a working Cancel
+    button next to its progress bar.
+
+    Verified live end-to-end through the real running app, not just
+    unit tests: started a real Luxembourg extraction against the live
+    Protomaps server through the actual `/admin/downloads/map_country`
+    route, cancelled it mid-flight through the actual cancel route, and
+    confirmed through the actual status route that it stopped and left
+    no partial `.mbtiles` file behind. 166-test suite passes, including
+    new regression tests for cancellation at every layer (JobTracker,
+    Downloader, extract_country).
+
 ---

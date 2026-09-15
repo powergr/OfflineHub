@@ -7,11 +7,16 @@ verified without depending on the live internet.
 
 import os
 import sqlite3
+import threading
 
 import pytest
+import requests
 
 from core.map_extract import (
     DEFAULT_MAX_ZOOM,
+    _HTTP_MAX_RETRIES,
+    ExtractionCancelled,
+    _HttpRangeSource,
     estimate_size_mb,
     extract_country,
     load_countries,
@@ -88,12 +93,15 @@ class _FakeReader:
         # Sparse: only a few tiles actually have data, matching how real
         # ocean/empty areas have no tile - extract_country must skip Nones
         # rather than writing null rows.
+        if (z, x, y) in _FAKE_FAILURES:
+            raise requests.exceptions.ReadTimeout("fake timeout")
         if (z, x, y) in _FAKE_TILES:
             return _FAKE_TILES[(z, x, y)]
         return None
 
 
 _FAKE_TILES = {}
+_FAKE_FAILURES = set()
 
 
 @pytest.fixture(autouse=True)
@@ -101,8 +109,20 @@ def _patch_reader(monkeypatch):
     monkeypatch.setattr("core.map_extract.Reader", _FakeReader)
     monkeypatch.setattr("core.map_extract.find_daily_build_url", lambda: "https://example.test/fake.pmtiles")
     _FAKE_TILES.clear()
+    _FAKE_FAILURES.clear()
     yield
     _FAKE_TILES.clear()
+    _FAKE_FAILURES.clear()
+
+
+def _all_coords(bbox):
+    coords = []
+    for z in range(0, DEFAULT_MAX_ZOOM + 1):
+        x0, x1, y0, y1 = tile_range(bbox, z)
+        for x in range(x0, x1 + 1):
+            for y in range(y0, y1 + 1):
+                coords.append((z, x, y))
+    return coords
 
 
 def test_extract_country_writes_real_mbtiles_schema(tmp_path):
@@ -170,3 +190,165 @@ def test_extract_country_calls_progress_cb_with_increasing_values(tmp_path):
 def test_extract_country_raises_for_unknown_iso(tmp_path):
     with pytest.raises(ValueError):
         extract_country("ZZ", str(tmp_path / "zz.mbtiles"))
+
+
+# ── Regression tests: a real admin report of a 30-minute extraction dying
+# on a single read timeout, then a retry hitting a locked leftover file ──
+
+def test_extract_country_tolerates_a_few_failed_tiles(tmp_path):
+    """A handful of tiles failing (simulating a transient network hiccup
+    that survives every retry) must not abort the whole extraction -
+    confirmed live to matter: a single read timeout among thousands of
+    tile fetches used to kill an entire 20-30 minute extraction outright."""
+    countries = load_countries()
+    _name, bbox = countries["LU"]
+    coords = _all_coords(bbox)
+    for coord in coords:
+        _FAKE_TILES[coord] = b"data"
+    for coord in coords[:2]:  # a small fraction, well under the threshold
+        _FAKE_FAILURES.add(coord)
+        del _FAKE_TILES[coord]
+
+    dest = str(tmp_path / "lu.mbtiles")
+    result = extract_country("LU", dest)
+
+    assert result["failed_tiles"] == 2
+    assert os.path.exists(dest)
+
+
+def test_extract_country_raises_and_cleans_up_when_too_many_tiles_fail(tmp_path):
+    """More than _MAX_FAILED_TILE_FRACTION of tiles failing must raise
+    instead of silently installing a mostly-blank map, and must not leave
+    a partial .mbtiles file behind for a retry to trip over."""
+    countries = load_countries()
+    _name, bbox = countries["LU"]
+    for coord in _all_coords(bbox):
+        _FAKE_FAILURES.add(coord)  # fail everything
+
+    dest = str(tmp_path / "lu.mbtiles")
+    with pytest.raises(RuntimeError):
+        extract_country("LU", dest)
+
+    assert not os.path.exists(dest)
+
+
+def test_extract_country_retry_after_failure_does_not_hit_a_locked_file(tmp_path):
+    """Regression test for a real report: a failed extraction used to
+    leave its sqlite connection open (conn.close() only ran on the
+    success path), so a second attempt at the same destination path
+    failed with WinError 32 ('used by another process') instead of just
+    being able to try again."""
+    countries = load_countries()
+    _name, bbox = countries["LU"]
+    coords = _all_coords(bbox)
+    for coord in coords:
+        _FAKE_FAILURES.add(coord)
+
+    dest = str(tmp_path / "lu.mbtiles")
+    with pytest.raises(RuntimeError):
+        extract_country("LU", dest)
+    assert not os.path.exists(dest)
+
+    # Now fix the "network" and retry against the exact same path a real
+    # admin would use clicking "Download" again - must succeed cleanly,
+    # not raise a file-in-use error from the previous attempt's connection.
+    _FAKE_FAILURES.clear()
+    for coord in coords:
+        _FAKE_TILES[coord] = b"data"
+
+    result = extract_country("LU", dest)
+
+    assert os.path.exists(dest)
+    assert result["failed_tiles"] == 0
+
+
+class _FakeResponse:
+    def __init__(self, content: bytes):
+        self.content = content
+
+    def raise_for_status(self):
+        pass
+
+
+class _FlakySession:
+    """A fake requests.Session whose .get() fails a fixed number of times
+    before succeeding (or never succeeds), so _HttpRangeSource's own retry
+    logic can be tested without any real network call."""
+
+    def __init__(self, fail_times: int):
+        self.fail_times = fail_times
+        self.calls = 0
+
+    def get(self, url, headers=None, timeout=None):
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise requests.exceptions.ReadTimeout("fake timeout")
+        return _FakeResponse(b"tile-bytes")
+
+
+def test_http_range_source_retries_transient_failures_and_succeeds(monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda *_a: None)  # don't really wait in tests
+    session = _FlakySession(fail_times=_HTTP_MAX_RETRIES - 1)  # fails all but the last attempt
+    source = _HttpRangeSource("https://example.test/fake.pmtiles", session=session)
+
+    data = source(0, 10)
+
+    assert data == b"tile-bytes"
+    assert session.calls == _HTTP_MAX_RETRIES
+
+
+def test_http_range_source_raises_after_exhausting_all_retries(monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda *_a: None)
+    session = _FlakySession(fail_times=_HTTP_MAX_RETRIES + 5)  # never succeeds
+    source = _HttpRangeSource("https://example.test/fake.pmtiles", session=session)
+
+    with pytest.raises(requests.exceptions.ReadTimeout):
+        source(0, 10)
+
+    assert session.calls == _HTTP_MAX_RETRIES
+
+
+# ── Cancellation ──────────────────────────────────────────────────────────────
+
+def test_extract_country_cancelled_before_starting_raises_and_leaves_no_file(tmp_path):
+    countries = load_countries()
+    _name, bbox = countries["LU"]
+    for coord in _all_coords(bbox):
+        _FAKE_TILES[coord] = b"data"
+
+    cancel_event = threading.Event()
+    cancel_event.set()  # already cancelled before extraction gets going
+
+    dest = str(tmp_path / "lu.mbtiles")
+    with pytest.raises(ExtractionCancelled):
+        extract_country("LU", dest, cancel_event=cancel_event)
+
+    assert not os.path.exists(dest)
+
+
+def test_extract_country_cancelled_mid_extraction_stops_and_cleans_up(tmp_path):
+    """Regression test for the admin's own request: cancelling a long
+    country extraction must actually stop it (not silently keep running to
+    completion in the background) and must not leave a half-written
+    .mbtiles file behind - there's no resume support for extraction the
+    way a plain HTTP download has, so a cancelled attempt should look
+    exactly like it never started."""
+    countries = load_countries()
+    _name, bbox = countries["LU"]
+    for coord in _all_coords(bbox):
+        _FAKE_TILES[coord] = b"data"
+
+    cancel_event = threading.Event()
+    progress_calls = []
+
+    def progress_cb(pct, _speed):
+        progress_calls.append(pct)
+        if pct >= 50:
+            cancel_event.set()
+
+    dest = str(tmp_path / "lu.mbtiles")
+    with pytest.raises(ExtractionCancelled):
+        extract_country("LU", dest, progress_cb=progress_cb, cancel_event=cancel_event)
+
+    assert not os.path.exists(dest)
+    assert progress_calls, "expected at least some progress before cancellation took effect"
