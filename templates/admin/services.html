@@ -25,6 +25,7 @@
         </span>
       </div>
       <form method="post" action="{{ url_for('admin.services_unload') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="folder" value="{{ folder }}" />
         <button type="submit" class="secondary">{{ t('services.unload') }}</button>
       </form>

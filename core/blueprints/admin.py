@@ -13,18 +13,20 @@ threads closed over one shared `for` loop's variables and clobbered each other.
 
 import json
 import os
+import secrets
 import tempfile
 import threading
 import time
 
 from flask import (
-    Blueprint, current_app, flash, jsonify, redirect,
+    Blueprint, abort, current_app, flash, jsonify, redirect,
     render_template, request, send_file, session, url_for,
 )
+from werkzeug.utils import secure_filename
 
 from core.auth import generate_salt, hash_password, verify_password
 from core.downloader import (
-    CATALOGUE, LLM_CATALOGUE, MAPS_CATALOGUE, STARTER_BUNDLE_KEYS, CatalogueError,
+    CATALOGUE, CATEGORIES, LLM_CATALOGUE, MAPS_CATALOGUE, STARTER_BUNDLE_KEYS, CatalogueError,
     llm_download_plan, resolve_catalogue_entry, search_catalogue,
 )
 from core.i18n import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, translate
@@ -34,8 +36,17 @@ from core import hotspot as hotspot_module
 
 bp = Blueprint("admin", __name__)
 
-_ALWAYS_OPEN = {"admin.login", "admin.setup", "admin.setup_finish"}
+# "admin.setup"/"admin.setup_finish" used to live in here permanently,
+# which meant setup_finish (which resets the admin password AND the
+# hotspot password) was reachable with zero authentication at ANY time,
+# not just during first-run - confirmed as a real, unauthenticated full
+# admin-takeover path. They now live in _SETUP_DOWNLOAD_ENDPOINTS instead,
+# which _gate() below only opens up while first_run is still true; once
+# setup completes, both endpoints require a real session like everything
+# else. Only the login page itself needs to be reachable unconditionally.
+_ALWAYS_OPEN = {"admin.login"}
 _SETUP_DOWNLOAD_ENDPOINTS = {
+    "admin.setup", "admin.setup_finish",
     "admin.download_quickstart", "admin.download_search",
     "admin.download_custom", "admin.download_llm", "admin.download_map",
     "admin.download_bundle", "admin.download_status",
@@ -77,6 +88,10 @@ def _hotspot_mgr():
     return current_app.config["HOTSPOT_MGR"]
 
 
+def _tile_server():
+    return current_app.config["TILE_SERVER"]
+
+
 def _usage():
     return current_app.config["USAGE"]
 
@@ -88,21 +103,51 @@ def _t(key: str, **kwargs) -> str:
     return translate(key, _cfg().get("language", DEFAULT_LANGUAGE), **kwargs)
 
 
+# ── CSRF ──────────────────────────────────────────────────────────────────────
+# No Flask-WTF/vendor dependency added - a session-bound token is all this
+# needs. Every admin template form carries it as a hidden field
+# (csrf_token()), and base.html's inline script attaches it as an
+# X-CSRF-Token header to every non-GET fetch() call site-wide, so no
+# individual fetch() call in any template had to be touched by hand.
+
+def _get_or_create_csrf_token() -> str:
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_hex(32)
+        session["csrf_token"] = token
+    return token
+
+
+@bp.context_processor
+def _inject_csrf():
+    return {"csrf_token": _get_or_create_csrf_token}
+
+
+def _check_csrf():
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    submitted = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
+    expected = session.get("csrf_token")
+    if not expected or not submitted or not secrets.compare_digest(submitted, expected):
+        abort(403)
+    return None
+
+
 # ── Session gate ──────────────────────────────────────────────────────────────
 
 @bp.before_request
 def _gate():
     if request.endpoint in _ALWAYS_OPEN:
-        return None
+        return _check_csrf()
 
     if _cfg().get("first_run", True):
         if request.endpoint in _SETUP_DOWNLOAD_ENDPOINTS:
-            return None
+            return _check_csrf()
         return redirect(url_for("admin.setup"))
 
     if not session.get("admin_authed"):
         return redirect(url_for("admin.login"))
-    return None
+    return _check_csrf()
 
 
 # ── Index ─────────────────────────────────────────────────────────────────────
@@ -171,6 +216,7 @@ def setup():
     bundle_remaining = [k for k in STARTER_BUNDLE_KEYS if k not in installed_keys]
     return render_template(
         "admin/setup.html", config=_cfg(), quickstart=quickstart,
+        quickstart_categories=CATEGORIES,
         llm_catalogue=LLM_CATALOGUE, maps_catalogue=MAPS_CATALOGUE,
         installed_keys=installed_keys,
         bundle_remaining=bundle_remaining,
@@ -223,6 +269,7 @@ def modules():
     bundle_remaining = [k for k in STARTER_BUNDLE_KEYS if k not in installed_keys]
     return render_template(
         "admin/modules.html", installed=installed, quickstart=quickstart,
+        quickstart_categories=CATEGORIES,
         llm_catalogue=LLM_CATALOGUE, maps_catalogue=MAPS_CATALOGUE,
         installed_keys=installed_keys,
         bundle_remaining=bundle_remaining,
@@ -271,7 +318,14 @@ def modules_install():
 
     try:
         if upload and upload.filename:
-            target = os.path.join(tempfile.gettempdir(), upload.filename)
+            # secure_filename strips any path components (e.g. "../../evil")
+            # the browser-supplied filename might carry - without it, this
+            # would be a second, independent traversal on top of the
+            # "filepath" field below, writing outside tempdir entirely.
+            safe_name = secure_filename(upload.filename)
+            if not safe_name:
+                raise ValueError(_t("flash.provide_file_or_upload"))
+            target = os.path.join(tempfile.gettempdir(), safe_name)
             upload.save(target)
         elif filepath:
             if not os.path.isfile(filepath):
@@ -293,11 +347,24 @@ def modules_install():
 @bp.route("/modules/remove", methods=["POST"])
 def modules_remove():
     folder = request.form.get("folder", "")
-    path = os.path.join(MODULES_DIR, folder)
-    if os.path.isdir(path):
-        _module_mgr().remove(path)
-        _usage().forget(folder)
-        flash(_t("flash.removed", name=folder), "success")
+    # Must be an actually-installed module, not just any path that happens
+    # to join onto something real under MODULES_DIR - confirmed real:
+    # without this check, folder="..\\..\\SomeOtherFolder" passed the old
+    # os.path.isdir() check for any real directory, and rmtree() then
+    # deleted it, wherever it actually was, with the app's admin rights.
+    installed = {f for f, _ in _module_mgr().list_modules()}
+    if folder not in installed:
+        flash(_t("flash.unknown_module"), "error")
+        return redirect(url_for("admin.modules"))
+
+    # A map's sqlite connection is cached separately by TileServer (not
+    # visible to ModuleManager/ContentRegistry) - must be closed before
+    # remove()'s rmtree() or a previously-viewed map's still-open .mbtiles
+    # file fails to delete with a Windows PermissionError.
+    _tile_server().close(folder)
+    _module_mgr().remove(folder)
+    _usage().forget(folder)
+    flash(_t("flash.removed", name=folder), "success")
     return redirect(url_for("admin.modules"))
 
 

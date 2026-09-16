@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="{{ current_lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ t('common.search') }} - {{ module_id }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <style>
+      .wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px; }
+      .top-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+      form { display:flex; gap:8px; margin-bottom: 24px; }
+      input[type=text] { margin-top: 0; font-size:15px; }
+      ul { list-style:none; padding:0; }
+      li { padding:12px 0; border-bottom:1px solid var(--border); }
+      a { text-decoration:none; }
+      a:hover { text-decoration:underline; }
+      .back { color: var(--muted); }
+      .page-label { font-weight: 700; margin-right: 8px; }
+      .snippet { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top-row">
+        <a class="back" href="/pdf/{{ module_id }}">&larr; {{ t('portal.back_to_document') }}</a>
+        <span class="version-badge">v{{ app_version }}</span>
+      </div>
+      <form method="get">
+        <input type="text" name="q" value="{{ query }}" placeholder="{{ t('portal.search_placeholder') }}" autofocus />
+        <button type="submit">{{ t('common.search') }}</button>
+      </form>
+
+      {% if query and not results %}
+        <p class="muted">{{ t('portal.no_results_for', query=query) }}</p>
+      {% elif results %}
+        <ul>
+          {% for page, snippet in results %}
+            <li>
+              <a href="/pdf/{{ module_id }}#page={{ page }}">
+                <span class="page-label">{{ t('portal.pdf_page_label', page=page) }}</span>
+                <span class="snippet">{{ snippet }}</span>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+  </body>
+</html>

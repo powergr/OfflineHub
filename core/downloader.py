@@ -39,6 +39,17 @@ _ACQUISITION_REL = "http://opds-spec.org/acquisition/open-access"
 # unreasonable as a "quick start" button. Use search_catalogue() instead to
 # let the admin browse the live library and see real sizes before choosing.
 
+# Groups Quick Start's now-23 entries into admin-facing category tabs
+# (templates/admin/_download_panel.html) instead of one long flat list.
+# Order here is the tab display order.
+CATEGORIES: list[tuple[str, str]] = [
+    ("reference",   "download_panel.category_reference"),
+    ("languages",   "download_panel.category_languages"),
+    ("subjects",    "download_panel.category_subjects"),
+    ("programming", "download_panel.category_programming"),
+    ("more",        "download_panel.category_more"),
+]
+
 CATALOGUE: dict[str, dict] = {
     "wikipedia_en_mini": {
         "name":        "Wikipedia (English, Mini)",
@@ -46,6 +57,7 @@ CATALOGUE: dict[str, dict] = {
         "description": "Top Wikipedia articles, text only, no images.",
         "opds_name":   "wikipedia_en_all",
         "opds_flavour": "mini",
+        "category":    "reference",
         "server":      "zim",
     },
     "gutenberg_lcc_l": {
@@ -54,6 +66,7 @@ CATALOGUE: dict[str, dict] = {
         "description": "English & American literature (LCC class L).",
         "opds_name":   "gutenberg_en_lcc-l",
         "opds_flavour": None,
+        "category":    "reference",
         "server":      "zim",
     },
     "vikidia_en": {
@@ -62,6 +75,7 @@ CATALOGUE: dict[str, dict] = {
         "description": "A kids' encyclopedia written for ~8-13 year olds.",
         "opds_name":   "vikidia_en_all",
         "opds_flavour": "maxi",
+        "category":    "reference",
         "server":      "zim",
     },
     "wikipedia_en_simple": {
@@ -70,6 +84,7 @@ CATALOGUE: dict[str, dict] = {
         "description": "Simplified vocabulary and shorter sentences, good for younger or ESL readers.",
         "opds_name":   "wikipedia_en-simple_all",
         "opds_flavour": "mini",
+        "category":    "reference",
         "server":      "zim",
     },
     "phet_simulations": {
@@ -78,6 +93,7 @@ CATALOGUE: dict[str, dict] = {
         "description": "Free interactive science & math simulations from University of Colorado Boulder.",
         "opds_name":   "phet_en_all",
         "opds_flavour": None,
+        "category":    "subjects",
         "server":      "zim",
     },
     "wikibooks_en": {
@@ -86,6 +102,7 @@ CATALOGUE: dict[str, dict] = {
         "description": "Collaboratively written textbooks and study guides across subjects.",
         "opds_name":   "wikibooks_en_all",
         "opds_flavour": "maxi",
+        "category":    "reference",
         "server":      "zim",
     },
     "wiktionary_en_simple": {
@@ -94,6 +111,7 @@ CATALOGUE: dict[str, dict] = {
         "description": "A basic dictionary with simplified definitions.",
         "opds_name":   "wiktionary_en-simple_all",
         "opds_flavour": "nopic",
+        "category":    "reference",
         "server":      "zim",
     },
 
@@ -112,6 +130,7 @@ CATALOGUE: dict[str, dict] = {
         "opds_name":   "wikipedia_es_all",
         "opds_flavour": "mini",
         "lang":        "spa",
+        "category":    "languages",
         "server":      "zim",
     },
     "vikidia_es": {
@@ -121,6 +140,7 @@ CATALOGUE: dict[str, dict] = {
         "opds_name":   "vikidia_es_all",
         "opds_flavour": "nopic",
         "lang":        "spa",
+        "category":    "languages",
         "server":      "zim",
     },
     "wikipedia_fr_mini": {
@@ -130,6 +150,7 @@ CATALOGUE: dict[str, dict] = {
         "opds_name":   "wikipedia_fr_all",
         "opds_flavour": "mini",
         "lang":        "fra",
+        "category":    "languages",
         "server":      "zim",
     },
     "vikidia_fr": {
@@ -139,6 +160,7 @@ CATALOGUE: dict[str, dict] = {
         "opds_name":   "vikidia_fr_all",
         "opds_flavour": "nopic",
         "lang":        "fra",
+        "category":    "languages",
         "server":      "zim",
     },
 
@@ -157,6 +179,7 @@ CATALOGUE: dict[str, dict] = {
         "description": "224,000+ history articles, from ancient civilizations to modern events.",
         "opds_name":   "wikipedia_en_history",
         "opds_flavour": "nopic",
+        "category":    "subjects",
         "server":      "zim",
     },
     "wikipedia_en_mathematics": {
@@ -165,6 +188,7 @@ CATALOGUE: dict[str, dict] = {
         "description": "112,000+ mathematics articles, from arithmetic to advanced topics.",
         "opds_name":   "wikipedia_en_mathematics",
         "opds_flavour": "mini",
+        "category":    "subjects",
         "server":      "zim",
     },
     "wikipedia_en_chemistry": {
@@ -173,6 +197,110 @@ CATALOGUE: dict[str, dict] = {
         "description": "57,000+ chemistry articles, from the periodic table to organic chemistry.",
         "opds_name":   "wikipedia_en_chemistry",
         "opds_flavour": "mini",
+        "category":    "subjects",
+        "server":      "zim",
+    },
+
+    # ── Phase 6: more knowledge sources ──────────────────────────────────────
+    # Checked live against the Kiwix catalog before adding these, not assumed
+    # from an old list. Every "name"/"flavour" below was confirmed to resolve
+    # a real URL via resolve_catalogue_entry() the same way the app itself
+    # calls it at runtime, not just that search_catalogue() could find it.
+
+    # devdocs.io-style reference docs: small (a few MB each, text-only, no
+    # video/images), one language/tool per ZIM. Picked the languages most
+    # likely to be taught in a K-12/intro CS setting rather than the whole
+    # dozen-plus Kiwix hosts (PHP, Ruby, Docker, PostgreSQL, MariaDB, Rust,
+    # and more are all real entries too - use Discover Content for those).
+    "devdocs_python": {
+        "name":        "Python Docs",
+        "emoji":       "🐍",
+        "description": "Official Python language and standard library reference.",
+        "opds_name":   "devdocs_en_python",
+        "opds_flavour": None,
+        "category":    "programming",
+        "server":      "zim",
+    },
+    "devdocs_javascript": {
+        "name":        "JavaScript Docs",
+        "emoji":       "💛",
+        "description": "JavaScript language reference, from devdocs.io.",
+        "opds_name":   "devdocs_en_javascript",
+        "opds_flavour": None,
+        "category":    "programming",
+        "server":      "zim",
+    },
+    "devdocs_cpp": {
+        "name":        "C++ Docs",
+        "emoji":       "➕",
+        "description": "C++ language and standard library reference.",
+        "opds_name":   "devdocs_en_cpp",
+        "opds_flavour": None,
+        "category":    "programming",
+        "server":      "zim",
+    },
+    "devdocs_html": {
+        "name":        "HTML Docs",
+        "emoji":       "🌐",
+        "description": "HTML element and attribute reference, from devdocs.io.",
+        "opds_name":   "devdocs_en_html",
+        "opds_flavour": None,
+        "category":    "programming",
+        "server":      "zim",
+    },
+    "devdocs_css": {
+        "name":        "CSS Docs",
+        "emoji":       "🎨",
+        "description": "CSS property and selector reference, from devdocs.io.",
+        "opds_name":   "devdocs_en_css",
+        "opds_flavour": None,
+        "category":    "programming",
+        "server":      "zim",
+    },
+
+    "medlineplus": {
+        "name":        "MedlinePlus",
+        "emoji":       "🏥",
+        "description": "The US National Library of Medicine's consumer health encyclopedia.",
+        "opds_name":   "medlineplus.gov_en_all",
+        "opds_flavour": None,
+        "category":    "more",
+        "server":      "zim",
+    },
+    "project_euler": {
+        "name":        "Project Euler",
+        "emoji":       "🧮",
+        "description": "A math and programming problem archive, for enrichment beyond class.",
+        "opds_name":   "freecodecamp_en_project-euler",
+        "opds_flavour": None,
+        "category":    "subjects",
+        "server":      "zim",
+    },
+    "wikivoyage_en": {
+        "name":        "Wikivoyage",
+        "emoji":       "🧳",
+        "description": "A worldwide travel guide: geography, culture, and practical local info.",
+        "opds_name":   "wikivoyage_en_all",
+        "opds_flavour": "nopic",
+        "category":    "more",
+        "server":      "zim",
+    },
+
+    # TED (video). Only added after confirming portal.py's content route
+    # actually supports HTTP Range requests (see content_page()) - without
+    # that, a video entry could never be seeked and had to fully download
+    # before it would even start playing. TED-Ed specifically, not a plain
+    # TED conference talks ZIM: it's TED's own curriculum-style short
+    # lesson format, the clearest fit for a classroom. Other TED topic
+    # slices (science, technology, etc.) are real catalogue entries too,
+    # reachable via Discover Content, if a school wants more than this one.
+    "ted_ed": {
+        "name":        "TED-Ed",
+        "emoji":       "🎬",
+        "description": "Short, curriculum-style animated lessons on science, history, and more.",
+        "opds_name":   "ted_mul_ted-ed",
+        "opds_flavour": None,
+        "category":    "more",
         "server":      "zim",
     },
 }
@@ -209,6 +337,15 @@ _FALLBACK_URLS = {
     "wikipedia_en_history": "https://lb.download.kiwix.org/zim/wikipedia/wikipedia_en_history_nopic_2026-07.zim",
     "wikipedia_en_mathematics": "https://lb.download.kiwix.org/zim/wikipedia/wikipedia_en_mathematics_mini_2026-06.zim",
     "wikipedia_en_chemistry": "https://lb.download.kiwix.org/zim/wikipedia/wikipedia_en_chemistry_mini_2026-07.zim",
+    "devdocs_python":       "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_python_2026-08.zim",
+    "devdocs_javascript":   "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_javascript_2026-07.zim",
+    "devdocs_cpp":          "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_cpp_2026-07.zim",
+    "devdocs_html":         "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_html_2026-07.zim",
+    "devdocs_css":          "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_css_2026-07.zim",
+    "medlineplus":          "https://lb.download.kiwix.org/zim/zimit/medlineplus.gov_en_all_2025-01.zim",
+    "project_euler":        "https://lb.download.kiwix.org/zim/freecodecamp/freecodecamp_en_project-euler_2026-08.zim",
+    "wikivoyage_en":        "https://lb.download.kiwix.org/zim/wikivoyage/wikivoyage_en_all_nopic_2026-06.zim",
+    "ted_ed":               "https://lb.download.kiwix.org/zim/ted/ted_mul_ted-ed_2026-04.zim",
 }
 
 # ── Offline LLM (onnxruntime-genai model) ────────────────────────────────────

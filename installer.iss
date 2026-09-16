@@ -130,6 +130,20 @@ end;
 function InitializeUninstall(): Boolean;
 begin
   Result := True;
+  // Confirmed against Inno Setup's own docs: plain MsgBox (unlike
+  // SuppressibleMsgBox) always shows a real window, even during a silent
+  // or very silent uninstall - it is not suppressed automatically the way
+  // Inno's own wizard UI is. A school's IT staff scripting a fleet-wide
+  // removal with /VERYSILENT would hit this box with nobody there to
+  // click it, hanging the uninstall indefinitely. Skip the prompt entirely
+  // when running silently, and default to keeping content rather than
+  // risking a silent wipe of gigabytes of downloaded modules (maps,
+  // Wikipedia, the offline assistant) with no one able to say no.
+  if UninstallSilent then
+  begin
+    KeepModules := True;
+    Exit;
+  end;
   KeepModules := False;
   if DirHasFiles(ExpandConstant('{app}\modules')) then
   begin

@@ -7,5 +7,6 @@ werkzeug>=3.1.0
 libzim>=3.13.0            # reads .zim files in-process, no kiwix-serve.exe needed
 onnxruntime-genai>=0.15.2 # small offline LLM inference, no vendor binary needed
 pmtiles>=3.8.0             # reads remote pmtiles archives for self-serve map extraction (core/map_extract.py)
+pypdf>=6.0.0               # extracts text from uploaded PDFs for search (core/pdf_reader.py), no vendor binary
 pystray>=0.19.5           # system tray icon (Open Portal / Open Admin / Quit)
 Pillow>=12.0.0             # tray icon image loading

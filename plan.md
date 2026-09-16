@@ -119,30 +119,61 @@
 Checked against the live Kiwix catalog before writing these, not assumed
 from memory or an old list.
 
-19. **Programming/developer reference ZIMs.** Kiwix's live catalog already
-    hosts docs for Python, PHP, Ruby, Rust, C/C++, Docker, PostgreSQL,
-    MariaDB, and a dozen-plus web frameworks. Same `CATALOGUE` pipeline as
-    the existing entries, so this is mostly new data entries, not new code.
-    A good fit for any coding or CS instruction happening on-site.
-20. **MedlinePlus.** The US National Library of Medicine's consumer health
-    encyclopedia, confirmed available in the catalog. Trustworthy and
-    appropriate for a school, and fills a real gap Wikipedia doesn't cover
-    well.
-21. **Project Euler.** A math problem archive, confirmed available. Good
-    for math and CS enrichment beyond the school's normal curriculum.
-22. **Wikivoyage.** A geography, culture, and travel guide, confirmed
-    available. Pairs naturally with Wikipedia for social studies.
-23. **TED talks (topic-sliced ZIMs).** Real educational video content,
-    confirmed available as several topic-specific splits (science, tech,
-    ideas, etc.). Needs verification before committing to it: whether
-    libzim actually streams embedded video smoothly over a school Wi-Fi
-    hotspot at classroom scale, not just for one viewer.
-24. **Let a school upload its own material.** A teacher's own PDFs,
-    worksheets, or slides as a searchable module, not just more curated
-    encyclopedias. This is a genuinely new content type (upload plus
-    indexing), not another catalogue entry, so it needs real scoping
-    first: which file types, how it gets indexed and searched, and
-    whether any storage limit makes sense.
+19. ✅ **Programming/developer reference ZIMs.** Done. Added five small
+    devdocs.io-style references to `CATALOGUE`: Python, JavaScript, C++,
+    HTML, CSS. Picked the languages most likely to be taught in a K-12/
+    intro CS setting, not the full dozen-plus Kiwix hosts (PHP, Ruby,
+    Docker, PostgreSQL, MariaDB, Rust and more are real entries too -
+    reachable via Discover Content). Every `name`/`flavour` was confirmed
+    live through `resolve_catalogue_entry()`, the exact function the app
+    itself calls at runtime, not just that a search found them. Verified
+    beyond just resolving a URL: ran a real download, real install, real
+    ZIM open, and a real full-text search through `devdocs_python` end to
+    end. Searching "list" correctly returned "List Objects" from Python's
+    C API docs.
+20. ✅ **MedlinePlus.** Done. Added as `medlineplus` (1.85GB, only one
+    flavour available). Confirmed live via `resolve_catalogue_entry()`.
+21. ✅ **Project Euler.** Done. Added as `project_euler`. The real, live
+    catalogue entry is `freecodecamp_en_project-euler` (~7MB) - hosted
+    under freeCodeCamp's ZIM, not a standalone one, confirmed by checking
+    the actual catalog rather than assuming a name.
+22. ✅ **Wikivoyage.** Done. Added as `wikivoyage_en`, the `nopic` flavour
+    (~223MB, all 67,558 articles worldwide) instead of `maxi` (~1.1GB),
+    matching the light-footprint preference already used for
+    wiktionary_en_simple and the Phase 3 subject slices.
+23. ✅ **TED talks (topic-sliced ZIMs).** Done - the verification this item
+    itself called for turned up a real blocker, and that got fixed first.
+    `core/zim_reader.py`'s `resolve()` always returned `bytes(item.content)`
+    - the whole item, fully materialized - and `portal.py`'s
+    `content_page()` wrapped that in a plain `Response` with no
+    `Accept-Ranges`/206 support. Confirmed by reading both, not assumed.
+    A video entry could never be seeked, and a multi-minute talk would
+    have had to fully download before playback could even start - the
+    "not smooth at classroom scale" risk this item flagged, confirmed as
+    a real, specific gap rather than a guess.
+
+    Added real HTTP Range support: `ZimReader.entry_info()` gets an
+    entry's size/mimetype without reading its content, and
+    `resolve_range()` slices libzim's own memoryview for the requested
+    byte range instead of copying the whole entry first.
+    `content_page()` now handles a `Range` header (normal, open-ended,
+    and suffix ranges, plus 416 for an unsatisfiable one) and still
+    serves the same full response as before when there's no Range header.
+
+    Verified two ways, not just unit tests: real HTTP Range requests
+    against a real installed ZIM through the actual running app,
+    confirming byte-for-byte that a ranged response exactly matches
+    slicing the equivalent full response; and 24 new tests covering the
+    Range-parsing edge cases directly (suffix ranges, clamping past the
+    end, malformed headers). Full suite: 183 passing.
+
+    Added `ted_ed` (TED-Ed specifically - TED's curriculum-style short
+    lesson format, the clearest fit for a classroom, not general TED
+    conference talks) to `CATALOGUE`, confirmed live via
+    `resolve_catalogue_entry()` (~5.7GB). Other TED topic slices are
+    real catalogue entries too, reachable via Discover Content.
+24. **Let a school upload its own material.** Scoped: PDF only, with
+    full-text search. Still to build.
 
 ## Phase 7: Fixes from real use
 
@@ -337,5 +368,195 @@ from memory or an old list.
     no partial `.mbtiles` file behind. 166-test suite passes, including
     new regression tests for cancellation at every layer (JobTracker,
     Downloader, extract_country).
+
+31. ✅ **A silent/unattended uninstall could hang instead of honoring
+    "keep content," risking custom maps and every other module.** Done.
+    Asked to check the uninstall logic for a custom-maps bug. Self-serve
+    country maps live under `modules\country_<iso>\`, the same tree as
+    every other module, so item 29's "keep on uninstall" fix already
+    covers them structurally. The real remaining gap was different:
+    `InitializeUninstall()` shows the keep/delete choice with a plain
+    `MsgBox`, and checked against Inno Setup's own documentation, plain
+    `MsgBox` (unlike `SuppressibleMsgBox`) always opens a real window,
+    even during a `/SILENT` or `/VERYSILENT` uninstall - it is not
+    suppressed automatically the way Inno's own wizard UI is.
+
+    A school running a fleet-wide silent removal (common for IT-managed
+    deployments) would hit that box with no one able to click it,
+    hanging the uninstall indefinitely rather than cleanly finishing one
+    way or the other.
+
+    Fixed by checking Inno's own `UninstallSilent()` function first: a
+    silent uninstall now skips the prompt entirely and defaults to
+    keeping the modules folder, rather than risking either a hang or an
+    unattended wipe of gigabytes of downloaded content (maps, Wikipedia,
+    the offline assistant) with nobody there to say no. Verified the
+    script still compiles cleanly with the real Inno Setup Compiler
+    (`ISCC.exe`, not just read through) after the change.
+
+32. ✅ **Quick Start's 23 cards were one long flat list, hard to scan for
+    what an admin actually wants.** Done. Asked directly for category
+    tabs to make browsing easier as Phase 6 kept growing the list.
+
+    Added a `category` field to every `CATALOGUE` entry
+    (`core/downloader.py`), grouped into five tabs: General Reference (6),
+    Other Languages (4), Subject-Specific (5), Programming (5), and
+    Health/Travel/More (3) - counts confirmed against the real catalogue,
+    not assumed. `refresh_catalogue()` already copies every entry via
+    `dict(item)`, so `category` flows through to the template with no
+    other backend change needed.
+
+    The tabs (`templates/admin/_download_panel.html`) filter client-side
+    with plain `style.display` toggling - all 23 cards are already in the
+    DOM, so switching is instant with no extra request, matching how the
+    self-serve country map search already filters client-side. The
+    chosen category is remembered in `sessionStorage` so it survives the
+    Starter Bundle button's `location.reload()`. New i18n keys added to
+    all 4 translation files.
+
+    Verified against the real running app, not just read through: an
+    isolated instance's actual `/admin/modules` HTML response was
+    inspected directly, confirming all 5 category tab buttons render
+    with the correct labels and that the real per-category card counts
+    (6/4/5/5/3) match the catalogue exactly. New regression tests confirm
+    every `CATALOGUE` entry has a valid category and that
+    `refresh_catalogue()` preserves it. 200-test suite passes.
+
+33. ✅ **The whole admin panel froze solid while the offline assistant was
+    generating a reply, not just the chat page.** Done. Real report:
+    reproduced from a phone connected to the hotspot Wi-Fi, confirming it
+    wasn't a same-tab/same-browser artifact.
+
+    Root-caused from the real installed model's own config, not guessed:
+    `assistant_phi4_mini/content/genai_config.json`'s
+    `session_options.provider_options` is empty, so no CPU thread limit
+    was ever set, and `core/llm_engine.py`'s `load()` called
+    `og.Model(self._model_dir)` with no `Config` at all. ONNX Runtime's
+    own documented default for an unset `intra_op_num_threads` is every
+    logical core on the machine. The Flask server is already threaded
+    (a request per OS thread - `main.py`'s `make_server(..., threaded=True)`),
+    but a thread still needs real CPU time to run at all; with every core
+    saturated by onnxruntime's own worker pool for the whole length of a
+    reply, the OS scheduler had nothing left to give the admin panel's
+    threads, whether or not the native call was also holding the GIL.
+
+    Fixed in `core/llm_engine.py`: a new `_build_config()` loads the
+    model's `Config`, overlays `intra_op_num_threads` capped to leave one
+    core free (`max(1, os.cpu_count() - 1)`, so it scales correctly
+    whether the school PC has 2 cores or 16), and `load()` now passes that
+    `Config` to `og.Model()` instead of the bare directory path. Confirmed
+    the `Config`/`overlay()` call sequence actually works against the real
+    installed `onnxruntime_genai` 0.15.2 package and the real model's own
+    config file, not just mocked - couldn't go further and load-test the
+    full model end to end, since this machine had only ~2.5GB free RAM at
+    the time against a 4.6GB model, and forcing that load risked
+    destabilizing a machine already low on memory. New regression tests
+    cover the thread-count math (including the `os.cpu_count() -> None`
+    edge case) and that `load()` passes the `Config` object through to
+    `og.Model()`, not the old raw path. 204-test suite passes.
+
+34. ✅ **A full codebase security review found 10 real, confirmed bugs -
+    two of them chaining into unauthenticated remote code execution as
+    admin.** Done. Asked for a security and bug review of the whole
+    codebase, not just a diff; ran 5 independent audits, personally
+    re-verified every finding by reading the real current code, then
+    fixed all 10.
+
+    The two most serious, chained together: `/admin/setup/finish`
+    (`core/blueprints/admin.py`) was permanently exempt from every auth
+    check, not just during first-run, so anyone on the hotspot Wi-Fi
+    could silently reset the admin password *and* the hotspot password
+    with zero credentials - and that hotspot password then got
+    f-string-interpolated unescaped into a PowerShell script
+    (`core/hotspot.py`'s `_try_winrt`) run by this already-elevated app,
+    so a password containing a single quote was PowerShell injection.
+    Fixed by moving `setup`/`setup_finish` out of the permanent
+    allow-list and into the first-run-only one (so they require a real
+    session once setup is complete, exactly like every other admin
+    route), and by escaping single quotes the way PowerShell's own
+    single-quoted-string rules require (doubling them) before either the
+    SSID or password reaches the script.
+
+    Two path-traversal bugs, one of them unauthenticated: `get_pdf_reader`/
+    `get_zim_reader`/`get_llm_engine`/`get_manifest`
+    (`core/module_manager.py`) joined a URL path segment straight into a
+    filesystem path with no check, reachable from the public, no-auth
+    portal blueprint - on Windows, a single Flask route segment can
+    legally contain literal backslashes (only "/" is a URL separator), so
+    `GET /pdf/..\..\..\Users\name\Documents` resolved outside
+    MODULES_DIR entirely. `/admin/modules/remove`'s `folder` form field
+    had the same shape, admin-session-gated. Fixed with one shared
+    `_resolve_module_dir()` helper that resolves the real path and
+    refuses anything outside MODULES_DIR, used by all four getters, by
+    `remove()` itself (which now takes a module name rather than a
+    caller-built path), and backed by `modules_remove()` additionally
+    checking `folder` against the real installed-module list before
+    calling it.
+
+    Two stored/reflected XSS holes, both from untrusted external text
+    reaching `innerHTML` unescaped: a module's name/description
+    (`templates/portal/index.html`, sourced from a "custom" Discover
+    Content download whose title/summary come from the live Kiwix
+    catalog feed) reached every student's browser on the public portal;
+    Discover Content's own search results
+    (`templates/admin/_download_panel.html`) reached the admin's own
+    session the same way. A third, related bug in the same file: search
+    results also built an `onclick='startCustom(${i}, ${JSON.stringify(item)})'`
+    attribute by hand, and `JSON.stringify` escapes double quotes but not
+    single ones, so a title containing `'` broke out of the
+    single-quoted attribute independent of the `innerHTML` issue. Fixed
+    with a small `escapeHTML()` helper (build a text node, read back its
+    escaped `innerHTML` - the standard technique) applied everywhere
+    untrusted text reaches the DOM, and by eliminating the two
+    hand-built `onclick="..."` attributes entirely: the map-open button
+    now carries its data via `data-*` attributes read by one delegated
+    click listener, and the search-result download button looks its item
+    up by index from an array instead of embedding it as inline JSON.
+
+    No CSRF protection existed anywhere - confirmed by grepping the whole
+    repo for `csrf`/`SameSite`/`WTF` and finding nothing. Fixed with a
+    small session-bound token (no new dependency): every admin template's
+    `<form>` now carries a hidden `csrf_token` field, and a short script
+    in `base.html` attaches it as an `X-CSRF-Token` header to every
+    non-GET `fetch()` call site-wide, so none of the many individual
+    `fetch()` call sites across `_download_panel.html`/`modules.html`
+    needed touching by hand. `modules_install`'s upload path also had its
+    own independent traversal risk (an uploaded file's own filename
+    wasn't sanitized before being joined onto tempdir) - fixed with
+    Werkzeug's own `secure_filename()`.
+
+    Two real concurrency/resource bugs, unrelated to auth: removing a map
+    module never closed `TileServer`'s separately-cached sqlite
+    connection first, so `rmtree()` hit a Windows `PermissionError` on a
+    previously-viewed map's still-open file - the same failure class
+    item 26/27 already fixed for a different code path, recurring here
+    because `TileServer` keeps its own connection cache outside
+    `ContentRegistry` entirely. Fixed with a new `TileServer.close()`
+    that `modules_remove()` calls before removing. Separately,
+    `get_llm_engine`'s check-existing/unload-previous/load-new sequence
+    had no lock, so two threads requesting two different chat modules at
+    once could both load a full multi-GB model concurrently, defeating
+    the documented single-resident-model design. Fixed with a lock around
+    the whole sequence.
+
+    Every fix verified for real, not just read through: a genuine Windows
+    file-lock test (rename a file immediately after `TileServer.close()`
+    to prove nothing still holds it open); a real threaded-concurrency
+    test proving `get_llm_engine` never loads two models at once; a real
+    `Flask` app built via `core.app_factory.create_app()` and driven
+    through `test_client()` (in-process, no real socket/subprocess)
+    proving `/admin/setup/finish` is actually blocked post-setup, that a
+    POST without the right CSRF token is actually rejected with 403 and
+    one with it succeeds, and that `/admin/modules/remove` actually
+    refuses a non-installed folder while still deleting a real one; the
+    PowerShell escaping tested against the exact script string
+    `_try_winrt()` builds; the JS syntax of both edited templates checked
+    with `node --check` after stripping Jinja tags. Building this test
+    coverage also surfaced and fixed a real, separate latent bug:
+    `admin.py` imported `MODULES_DIR` by value at its own import time, so
+    patching `core.module_manager.MODULES_DIR` in a test never reached
+    `modules_remove()` - fixed by having `remove()` resolve the module
+    path itself instead of the caller constructing one. 229-test suite
+    passes (25 new tests).
 
 ---

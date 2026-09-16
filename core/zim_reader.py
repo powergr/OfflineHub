@@ -55,6 +55,40 @@ class ZimReader:
         item = entry.get_item()
         return bytes(item.content), item.mimetype
 
+    def entry_info(self, path: str) -> tuple[int, str] | None:
+        """(size, mimetype) for an entry, without reading its content. Used
+        to compute HTTP Range boundaries (including a suffix range like
+        "bytes=-500") before resolve_range() actually slices anything."""
+        if not self._archive.has_entry_by_path(path):
+            return None
+        entry = self._archive.get_entry_by_path(path)
+        entry = self._follow_redirects(entry)
+        if entry is None:
+            return None
+        item = entry.get_item()
+        return item.size, item.mimetype
+
+    def resolve_range(self, path: str, start: int, end: int) -> bytes | None:
+        """
+        Byte range [start, end] (inclusive) of an entry's content - for HTTP
+        Range requests (206 Partial Content). This is what lets a video or
+        audio entry actually stream and be seekable in a browser, instead of
+        needing the whole file downloaded before playback can start.
+
+        Slices libzim's own memoryview (`item.content`) rather than calling
+        resolve()'s bytes(item.content) first - confirmed via libzim's own
+        docs that .content is a memoryview, not a full in-memory copy, so
+        this only reads the requested range, not the whole entry.
+        """
+        if not self._archive.has_entry_by_path(path):
+            return None
+        entry = self._archive.get_entry_by_path(path)
+        entry = self._follow_redirects(entry)
+        if entry is None:
+            return None
+        item = entry.get_item()
+        return bytes(item.content[start:end + 1])
+
     def is_redirect(self, path: str) -> str | None:
         """If `path` is a redirect entry, return the target path, else None."""
         if not self._archive.has_entry_by_path(path):

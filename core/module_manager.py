@@ -2,9 +2,10 @@
 ModuleManager: install, list, remove, and open content modules.
 
 No subprocesses. `zim` modules are opened in-process via ZimReader (libzim),
-`mbtiles` modules are read in-process by TileServer (sqlite), and `llm`
-modules are opened in-process via LLMEngine (onnxruntime-genai). There is no
-vendor binary of any kind involved.
+`mbtiles` modules are read in-process by TileServer (sqlite), `llm` modules
+are opened in-process via LLMEngine (onnxruntime-genai), and `pdf` modules
+(a teacher's own uploaded material) are opened in-process via PdfReader
+(pypdf). There is no vendor binary of any kind involved.
 """
 
 import glob
@@ -13,8 +14,10 @@ import logging
 import os
 import shutil
 import sqlite3
+import threading
 from shutil import copy2, rmtree
 
+from core.pdf_reader import PdfReader
 from core.registry import ContentRegistry
 from core.zim_reader import ZimReader
 
@@ -48,7 +51,29 @@ def _detect_mbtiles_format(path: str) -> str:
 BASE_DIR    = r"C:\OfflineHub"
 MODULES_DIR = os.path.join(BASE_DIR, "modules")
 
-VALID_TYPES = {"zim", "mbtiles", "llm"}
+VALID_TYPES = {"zim", "mbtiles", "llm", "pdf"}
+
+
+def _resolve_module_dir(folder: str) -> str:
+    """
+    Resolves `folder` to a real path under MODULES_DIR, refusing anything
+    that would escape it. Security-critical: `folder` comes straight from
+    a URL path segment (module_id) on routes core/blueprints/portal.py's
+    own docstring describes as having no authentication at all. Only "/"
+    is a URL path separator, so a single route segment can legally contain
+    a literal ".." or a backslash - and on Windows, os.path.join treats a
+    backslash as a real path separator, so an unchecked folder like
+    "..\\..\\Users\\name\\Documents" resolves straight outside MODULES_DIR.
+    Checking the resolved real path is still inside MODULES_DIR catches
+    every variant of that (relative ".." components, absolute paths, and
+    backslash-smuggling) in one place, rather than trying to blocklist
+    individual characters.
+    """
+    candidate = os.path.realpath(os.path.join(MODULES_DIR, folder))
+    base = os.path.realpath(MODULES_DIR)
+    if candidate != base and not candidate.startswith(base + os.sep):
+        raise ValueError(f"Invalid module id: {folder!r}")
+    return candidate
 
 
 class ModuleManager:
@@ -56,6 +81,7 @@ class ModuleManager:
     def __init__(self, registry: ContentRegistry):
         self.registry = registry
         self._llm_loaded_module: str | None = None
+        self._llm_lock = threading.Lock()
 
     # ── Listing ───────────────────────────────────────────────────────────────
 
@@ -99,7 +125,11 @@ class ModuleManager:
         return results
 
     def get_manifest(self, folder: str) -> dict | None:
-        manifest_path = os.path.join(MODULES_DIR, folder, "manifest.json")
+        try:
+            mod_dir = _resolve_module_dir(folder)
+        except ValueError:
+            return None
+        manifest_path = os.path.join(mod_dir, "manifest.json")
         if not os.path.exists(manifest_path):
             return None
         with open(manifest_path, encoding="utf-8") as f:
@@ -108,15 +138,15 @@ class ModuleManager:
     # ── Install: raw file / zip / catalogue download ────────────────────────────
 
     def install_from_raw_file(self, filepath: str):
-        """MAGIC INSTALLER: a raw .zim or .mbtiles file -> folder + manifest."""
+        """MAGIC INSTALLER: a raw .zim / .mbtiles / .pdf file -> folder + manifest."""
         filename = os.path.basename(filepath)
         basename, ext = os.path.splitext(filename)
         ext = ext.lower()
 
-        if ext not in (".zim", ".mbtiles"):
-            raise ValueError(f"Unsupported file type '{ext}'. Please select a .zim or .mbtiles file.")
+        if ext not in (".zim", ".mbtiles", ".pdf"):
+            raise ValueError(f"Unsupported file type '{ext}'. Please select a .zim, .mbtiles, or .pdf file.")
 
-        mod_type = "zim" if ext == ".zim" else "mbtiles"
+        mod_type = {".zim": "zim", ".mbtiles": "mbtiles", ".pdf": "pdf"}[ext]
 
         clean_name = basename.replace("_", " ").title()
 
@@ -126,6 +156,7 @@ class ModuleManager:
         elif "gutenberg" in lower_name: emoji = "📖"
         elif "khan" in lower_name: emoji = "🎓"
         elif ext == ".mbtiles": emoji = "🗺️"
+        elif ext == ".pdf": emoji = "📄"
 
         safe_name = _safe_name(basename)
         dest_dir = os.path.join(MODULES_DIR, safe_name)
@@ -207,7 +238,7 @@ class ModuleManager:
                 raise FileExistsError(
                     f"'{key}' is already installed. Remove it first if you want to replace it."
                 )
-            self.remove(mod_dir)
+            self.remove(key)
         os.makedirs(os.path.join(mod_dir, "content"), exist_ok=True)
 
         dest_file = os.path.join(mod_dir, "content", os.path.basename(downloaded_path))
@@ -235,7 +266,7 @@ class ModuleManager:
                 raise FileExistsError(
                     f"'{key}' is already installed. Remove it first if you want to replace it."
                 )
-            self.remove(mod_dir)
+            self.remove(key)
         os.makedirs(os.path.join(mod_dir, "content"), exist_ok=True)
 
         dest_file = os.path.join(mod_dir, "content", os.path.basename(downloaded_path))
@@ -317,12 +348,20 @@ class ModuleManager:
 
     # ── Remove ────────────────────────────────────────────────────────────────
 
-    def remove(self, folder_path: str):
-        name = os.path.basename(folder_path.rstrip("/\\"))
-        self.registry.unload(name)
-        if name == self._llm_loaded_module:
+    def remove(self, folder: str):
+        """
+        Removes an installed module by name (not a caller-supplied path) -
+        resolved internally via `_resolve_module_dir`, the same
+        traversal-safe helper the getters use, so a bad `folder` value
+        can't end up deleting something outside MODULES_DIR here either.
+        Callers only ever need to know the module's key, not construct a
+        filesystem path themselves.
+        """
+        mod_dir = _resolve_module_dir(folder)
+        self.registry.unload(folder)
+        if folder == self._llm_loaded_module:
             self._llm_loaded_module = None
-        rmtree(folder_path)
+        rmtree(mod_dir)
 
     # ── Open (in-process, no subprocess) ─────────────────────────────────────
 
@@ -342,8 +381,31 @@ class ModuleManager:
                 self.registry.register(folder, "mbtiles")
         elif mod_type == "llm":
             self.registry.register(folder, "llm")
+        elif mod_type == "pdf":
+            self.get_pdf_reader(folder)
         else:
             self.registry.mark_error(folder, f"Unknown module type: '{mod_type}'")
+
+    def get_pdf_reader(self, folder: str) -> PdfReader:
+        """Return the cached PdfReader for `folder`, opening it on first use."""
+        existing = self.registry.get_handle(folder)
+        if existing is not None:
+            return existing
+
+        path = _resolve_module_dir(folder)
+        pdfs = glob.glob(os.path.join(path, "**", "*.pdf"), recursive=True)
+        if not pdfs:
+            self.registry.mark_error(folder, "No .pdf file found in module folder.")
+            raise FileNotFoundError(f"No .pdf file found for module '{folder}'.")
+
+        try:
+            reader = PdfReader(pdfs[0])
+        except Exception as e:
+            self.registry.mark_error(folder, str(e))
+            raise
+
+        self.registry.register(folder, "pdf", handle=reader)
+        return reader
 
     def get_zim_reader(self, folder: str) -> ZimReader:
         """Return the cached ZimReader for `folder`, opening it on first use."""
@@ -351,7 +413,7 @@ class ModuleManager:
         if existing is not None:
             return existing
 
-        path = os.path.join(MODULES_DIR, folder)
+        path = _resolve_module_dir(folder)
         zims = glob.glob(os.path.join(path, "**", "*.zim"), recursive=True)
         if not zims:
             self.registry.mark_error(folder, "No .zim file found in module folder.")
@@ -371,6 +433,15 @@ class ModuleManager:
         Return the cached LLMEngine for `folder`, loading it on first use.
         Only one LLM model is kept resident at a time. Loading a different
         one unloads whichever was previously loaded.
+
+        The whole check-existing/unload-previous/load-new sequence runs
+        under `_llm_lock`. Without it, two Flask threads requesting two
+        different chat modules at nearly the same moment could both pass
+        the initial "existing is None" check before either one records
+        which module is now loaded, so both would load a full multi-GB
+        model concurrently - defeating the single-resident-model design
+        this method's own docstring describes, and leaking whichever
+        engine's registry.register() call loses the race.
         """
         from core.llm_engine import LLMEngine  # imported lazily: heavy dependency
 
@@ -378,20 +449,28 @@ class ModuleManager:
         if existing is not None:
             return existing
 
-        if self._llm_loaded_module and self._llm_loaded_module != folder:
-            self.registry.unload(self._llm_loaded_module)
+        with self._llm_lock:
+            # Re-check now that we hold the lock - another thread may have
+            # already loaded exactly this module while we were waiting.
+            existing = self.registry.get_handle(folder)
+            if existing is not None:
+                return existing
 
-        path = os.path.join(MODULES_DIR, folder, "content")
-        try:
-            engine = LLMEngine(path)
-            engine.load()
-        except Exception as e:
-            self.registry.mark_error(folder, str(e))
-            raise
+            if self._llm_loaded_module and self._llm_loaded_module != folder:
+                self.registry.unload(self._llm_loaded_module)
 
-        self.registry.register(folder, "llm", handle=engine)
-        self._llm_loaded_module = folder
-        return engine
+            mod_dir = _resolve_module_dir(folder)
+            path = os.path.join(mod_dir, "content")
+            try:
+                engine = LLMEngine(path)
+                engine.load()
+            except Exception as e:
+                self.registry.mark_error(folder, str(e))
+                raise
+
+            self.registry.register(folder, "llm", handle=engine)
+            self._llm_loaded_module = folder
+            return engine
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────
@@ -440,10 +519,11 @@ def _reconstruct_manifest(folder: str, mod_dir: str) -> dict | None:
     """
     mbtiles = glob.glob(os.path.join(mod_dir, "**", "*.mbtiles"), recursive=True)
     zims = glob.glob(os.path.join(mod_dir, "**", "*.zim"), recursive=True)
+    pdfs = glob.glob(os.path.join(mod_dir, "**", "*.pdf"), recursive=True)
     has_llm_content = os.path.isdir(os.path.join(mod_dir, "content")) and bool(
         os.listdir(os.path.join(mod_dir, "content"))
-    ) and not mbtiles and not zims
-    if not mbtiles and not zims and not has_llm_content:
+    ) and not mbtiles and not zims and not pdfs
+    if not mbtiles and not zims and not pdfs and not has_llm_content:
         return None
 
     if folder.startswith("country_") and mbtiles:
@@ -479,6 +559,11 @@ def _reconstruct_manifest(folder: str, mod_dir: str) -> dict | None:
             manifest = {
                 "name": name, "emoji": catalogue_item["emoji"] if catalogue_item else "📚",
                 "type": "zim", "description": description,
+            }
+        elif pdfs:
+            manifest = {
+                "name": name, "emoji": catalogue_item["emoji"] if catalogue_item else "📄",
+                "type": "pdf", "description": description,
             }
         else:
             manifest = {

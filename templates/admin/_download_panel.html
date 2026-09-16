@@ -17,9 +17,15 @@
   <button type="button" class="btn secondary" id="bundle-cancel" style="display:none">{{ t('common.cancel') }}</button>
 </div>
 {% endif %}
+<div class="category-tabs" id="category-tabs">
+  <button type="button" class="category-tab active" data-category-btn="all" onclick="showCategory('all')">{{ t('download_panel.category_all') }}</button>
+  {% for slug, label_key in (quickstart_categories | default([])) %}
+  <button type="button" class="category-tab" data-category-btn="{{ slug }}" onclick="showCategory('{{ slug }}')">{{ t(label_key) }}</button>
+  {% endfor %}
+</div>
 <div class="grid" id="quickstart-list">
   {% for key, item in quickstart.items() %}
-  <div class="card dl-card" id="qs-row-{{ key }}">
+  <div class="card dl-card" id="qs-row-{{ key }}" data-category="{{ item.category or 'more' }}">
     <div class="dl-card-head">
       <span class="dl-emoji">{{ item.emoji }}</span>
       <span class="dl-name">{{ item.name }}</span>
@@ -39,6 +45,7 @@
   </div>
   {% endfor %}
 </div>
+<p class="muted" id="category-empty" style="display:none; margin-top: 10px;">{{ t('download_panel.category_empty') }}</p>
 </section>
 
 <section class="tab-panel" data-tab="llm">
@@ -118,6 +125,14 @@
   .dl-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
   .dl-card > .btn, .dl-card > button { margin-top: 14px; width: 100%; }
   .bundle-card { border-color: var(--accent2); margin-bottom: 18px; }
+  .category-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .category-tab {
+    padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--muted); font-weight: 600;
+    font-size: 12.5px; cursor: pointer;
+  }
+  .category-tab:hover { color: var(--text); }
+  .category-tab.active { background: var(--accent2); color: #fff; border-color: var(--accent2); }
 </style>
 
 <script>
@@ -130,6 +145,19 @@
   const T_SEARCHING = "{{ t('download_panel.searching') | e }}";
   const T_NO_RESULTS = "{{ t('download_panel.no_results') | e }}";
   const T_ARTICLES = "{{ t('download_panel.articles') | e }}";
+
+  // Text inserted into innerHTML below (search result titles/summaries,
+  // country names) can originate from a live external source (the Kiwix
+  // catalog feed) rather than this app's own fixed strings - escape it
+  // before it reaches the DOM. Building a text node and reading back its
+  // escaped HTML is the standard, reliable way to do this without a
+  // library: it can't be tricked by anything short of actual HTML tags,
+  // unlike a hand-rolled replace() chain.
+  function escapeHTML(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  }
 
   async function pollJob(jobId, onProgress, onDone) {
     const poll = async () => {
@@ -194,6 +222,32 @@
         });
       });
   }
+
+  // Quick Start category tabs: purely client-side filtering of cards
+  // already in the DOM (23 entries is cheap to keep all rendered), so
+  // switching categories is instant with no extra request. Remembered in
+  // sessionStorage so it survives the bundle button's location.reload().
+  function showCategory(slug) {
+    document.querySelectorAll("#category-tabs .category-tab").forEach((el) => {
+      el.classList.toggle("active", el.dataset.categoryBtn === slug);
+    });
+    let shown = 0;
+    document.querySelectorAll("#quickstart-list .dl-card").forEach((el) => {
+      const match = slug === "all" || el.dataset.category === slug;
+      el.style.display = match ? "" : "none";
+      if (match) shown++;
+    });
+    document.getElementById("category-empty").style.display = shown ? "none" : "block";
+    try { sessionStorage.setItem("qs-category", slug); } catch (e) {}
+  }
+
+  (function restoreCategory() {
+    let saved = "all";
+    try { saved = sessionStorage.getItem("qs-category") || "all"; } catch (e) {}
+    if (document.querySelector(`#category-tabs [data-category-btn="${saved}"]`)) {
+      showCategory(saved);
+    }
+  })();
 
   function startQuickstart(key) {
     const btn = document.getElementById(`qs-btn-${key}`);
@@ -300,19 +354,21 @@
         if (!data.results.length) { results.innerHTML = `<p class="muted">${T_NO_RESULTS}</p>`; return; }
 
         results.innerHTML = "";
+        searchResultsByIndex = data.results;
         data.results.forEach((item, i) => {
           const gb = (item.size / 1073741824).toFixed(1);
           const card = document.createElement("div");
           card.className = "card dl-card";
+          const flavourText = item.flavour ? ` (${item.flavour})` : "";
           card.innerHTML = `
             <div class="dl-card-head">
               <span class="dl-emoji">📖</span>
-              <span class="dl-name">${item.title}${item.flavour ? " (" + item.flavour + ")" : ""}</span>
+              <span class="dl-name">${escapeHTML(item.title)}${escapeHTML(flavourText)}</span>
             </div>
-            <p class="dl-desc">${item.summary || ""}</p>
-            <div class="dl-meta">${item.language} · ${item.article_count.toLocaleString()} ${T_ARTICLES} · ${gb} GB</div>
+            <p class="dl-desc">${escapeHTML(item.summary || "")}</p>
+            <div class="dl-meta">${escapeHTML(item.language)} · ${item.article_count.toLocaleString()} ${T_ARTICLES} · ${gb} GB</div>
             <div class="progress" id="sr-progress-${i}" style="display:none"><div></div></div>
-            <button type="button" class="btn" id="sr-btn-${i}" onclick='startCustom(${i}, ${JSON.stringify(item)})'>{{ t('common.download') | e }}</button>
+            <button type="button" class="btn" id="sr-btn-${i}" onclick="startCustom(${i})">{{ t('common.download') | e }}</button>
             <button type="button" class="btn secondary" id="sr-cancel-${i}" style="display:none">${T_CANCEL}</button>`;
           results.appendChild(card);
         });
@@ -320,7 +376,16 @@
     return false;
   }
 
-  function startCustom(i, item) {
+  // Populated by doSearch() right before rendering cards. startCustom()
+  // looks the item up by index instead of the button's onclick embedding
+  // the item as inline JSON - avoids a double-encoding problem (a JS
+  // string literal nested inside an HTML attribute) that a title
+  // containing a stray quote could break out of, independent of the
+  // innerHTML escaping above.
+  let searchResultsByIndex = [];
+
+  function startCustom(i) {
+    const item = searchResultsByIndex[i];
     const btn = document.getElementById(`sr-btn-${i}`);
     const bar = document.getElementById(`sr-progress-${i}`);
     const cancelBtn = document.getElementById(`sr-cancel-${i}`);

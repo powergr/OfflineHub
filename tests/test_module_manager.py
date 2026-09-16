@@ -21,6 +21,33 @@ def _make_mbtiles(path: str, fmt: str):
     conn.close()
 
 
+def _make_pdf_bytes(text: str = "Hello World") -> bytes:
+    """A minimal, real, single-page PDF (raw PDF syntax) - open_module()
+    actually opens a "pdf" install via real pypdf, which a plain bytes
+    fixture isn't valid input for, unlike the mbtiles/zim fakes above."""
+    stream = f"BT /F1 24 Tf 72 700 Td ({text}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 5 0 R >> >> "
+        b"/MediaBox [0 0 612 792] /Contents 4 0 R >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for i, obj in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref_start = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode()
+    out += b"0000000000 65535 f \n"
+    for off in offsets[1:]:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_start}\n%%EOF".encode()
+    return bytes(out)
+
+
 @pytest.fixture
 def mgr():
     return ModuleManager(ContentRegistry())
@@ -85,6 +112,33 @@ def test_detect_mbtiles_format_raster_from_real_metadata():
         path = os.path.join(tmp, "vector_named_but_actually_raster.mbtiles")
         _make_mbtiles(path, "png")
         assert module_manager._detect_mbtiles_format(path) == "raster"
+
+
+def test_install_raw_pdf_file(isolated_dirs, mgr, tmp_path):
+    src = tmp_path / "Volcanoes Worksheet.pdf"
+    src.write_bytes(_make_pdf_bytes("All about volcanoes"))
+
+    mgr.install_from_raw_file(str(src))
+
+    mod_dir = isolated_dirs["modules"] / "Volcanoes Worksheet"
+    manifest = json.loads((mod_dir / "manifest.json").read_text())
+    assert manifest["type"] == "pdf"
+    assert manifest["emoji"] == "📄"
+    assert (mod_dir / "content" / "Volcanoes Worksheet.pdf").exists()
+
+
+def test_install_raw_pdf_file_opens_successfully_and_is_searchable(isolated_dirs, mgr, tmp_path):
+    """install_from_raw_file() calls open_module(), which for type "pdf"
+    eagerly opens it via get_pdf_reader() - confirms that actually succeeds
+    against a real PDF, not just that the manifest looks right."""
+    src = tmp_path / "notes.pdf"
+    src.write_bytes(_make_pdf_bytes("A lesson about volcanoes"))
+
+    mgr.install_from_raw_file(str(src))
+
+    assert mgr.registry.get_status("notes") != "error"
+    reader = mgr.get_pdf_reader("notes")
+    assert reader.search("volcanoes")
 
 
 def test_install_raw_file_rejects_unsupported_extension(isolated_dirs, mgr, tmp_path):
@@ -267,6 +321,23 @@ def test_list_modules_skips_corrupt_manifest(isolated_dirs, mgr):
     assert "bad" not in results
 
 
+def test_list_modules_reconstructs_manifest_for_pdf_only_folder(isolated_dirs, mgr, tmp_path):
+    """Regression coverage for the has_llm_content fallback: a folder with
+    real content but no manifest used to only distinguish mbtiles/zim from
+    "everything else", so a PDF-only folder (real content, no mbtiles, no
+    zim) would have been wrongly reconstructed as type "llm"."""
+    mod_dir = isolated_dirs["modules"] / "my_upload"
+    content_dir = mod_dir / "content"
+    content_dir.mkdir(parents=True)
+    (content_dir / "worksheet.pdf").write_bytes(_make_pdf_bytes("Some content"))
+
+    results = dict(mgr.list_modules())
+
+    assert results["my_upload"]["type"] == "pdf"
+    manifest = json.loads((mod_dir / "manifest.json").read_text())
+    assert manifest["type"] == "pdf"
+
+
 def test_list_modules_empty_when_dir_missing(isolated_dirs, mgr, monkeypatch):
     import core.module_manager as module_manager
     monkeypatch.setattr(module_manager, "MODULES_DIR", str(isolated_dirs["modules"] / "nope"))
@@ -332,7 +403,118 @@ def test_remove_deletes_folder_and_unregisters(isolated_dirs, mgr, tmp_path):
     assert mod_dir.exists()
     assert mgr.registry.get_status("phet") == "loaded"
 
-    mgr.remove(str(mod_dir))
+    mgr.remove("phet")
 
     assert not mod_dir.exists()
     assert mgr.registry.get_status("phet") == "unloaded"
+
+
+def test_remove_rejects_traversal_folder(isolated_dirs, mgr, tmp_path):
+    outside = tmp_path / "secret"
+    outside.mkdir()
+    with pytest.raises(ValueError):
+        mgr.remove("..\\secret")
+    assert outside.exists()
+
+
+# ── _resolve_module_dir (path traversal) ────────────────────────────────────
+# Regression coverage: get_pdf_reader/get_zim_reader/get_llm_engine used to
+# os.path.join(MODULES_DIR, folder, ...) with no check at all. On Windows, a
+# folder value containing backslashes (legal inside a single Flask URL path
+# segment, since only "/" is a real URL separator) resolves as real path
+# components once it reaches the filesystem - reachable from the fully
+# public, unauthenticated portal blueprint.
+
+def test_resolve_module_dir_allows_a_real_module_name(isolated_dirs):
+    real = isolated_dirs["modules"] / "wikipedia_en_mini"
+    real.mkdir()
+    resolved = module_manager._resolve_module_dir("wikipedia_en_mini")
+    assert os.path.realpath(resolved) == os.path.realpath(str(real))
+
+
+def test_resolve_module_dir_rejects_dotdot_traversal(isolated_dirs, tmp_path):
+    outside = tmp_path / "secret"
+    outside.mkdir()
+    with pytest.raises(ValueError):
+        module_manager._resolve_module_dir(os.path.join("..", "secret"))
+
+
+def test_resolve_module_dir_rejects_backslash_smuggled_traversal(isolated_dirs, tmp_path):
+    """The exact Windows-specific exploit shape from the security review:
+    a single URL path segment containing literal backslashes."""
+    outside = tmp_path / "secret"
+    outside.mkdir()
+    with pytest.raises(ValueError):
+        module_manager._resolve_module_dir("..\\secret")
+
+
+def test_resolve_module_dir_rejects_absolute_path(isolated_dirs, tmp_path):
+    outside = tmp_path / "secret"
+    outside.mkdir()
+    with pytest.raises(ValueError):
+        module_manager._resolve_module_dir(str(outside))
+
+
+def test_get_pdf_reader_rejects_traversal_folder(isolated_dirs, mgr):
+    with pytest.raises(ValueError):
+        mgr.get_pdf_reader("..\\..\\Windows")
+
+
+def test_get_zim_reader_rejects_traversal_folder(isolated_dirs, mgr):
+    with pytest.raises(ValueError):
+        mgr.get_zim_reader("..\\..\\Windows")
+
+
+def test_get_manifest_returns_none_for_traversal_folder(isolated_dirs, mgr):
+    assert mgr.get_manifest("..\\..\\Windows") is None
+
+
+# ── get_llm_engine concurrency ──────────────────────────────────────────────
+
+def test_get_llm_engine_serializes_concurrent_loads_of_different_modules(isolated_dirs, mgr, monkeypatch):
+    """Regression test: two threads requesting two different LLM modules at
+    once used to both pass the "existing is None" check before either
+    recorded which module was loaded, so both loaded a full model
+    concurrently - defeating the single-resident-model design. With the
+    lock, exactly one load must happen at a time."""
+    import threading
+    import time
+
+    active_loads = []
+    max_concurrent = [0]
+    load_lock = threading.Lock()
+
+    class FakeEngine:
+        def __init__(self, path):
+            self.path = path
+
+        def load(self):
+            with load_lock:
+                active_loads.append(1)
+                max_concurrent[0] = max(max_concurrent[0], len(active_loads))
+            time.sleep(0.05)  # simulate real multi-GB model load time
+            with load_lock:
+                active_loads.pop()
+
+    import core.llm_engine as llm_engine_module
+    monkeypatch.setattr(llm_engine_module, "LLMEngine", FakeEngine)
+
+    for name in ("assistant_a", "assistant_b"):
+        mod_dir = isolated_dirs["modules"] / name / "content"
+        mod_dir.mkdir(parents=True)
+
+    results = {}
+
+    def load_one(name):
+        results[name] = mgr.get_llm_engine(name)
+
+    t1 = threading.Thread(target=load_one, args=("assistant_a",))
+    t2 = threading.Thread(target=load_one, args=("assistant_b",))
+    t1.start()
+    t2.start()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert max_concurrent[0] == 1, "two models were loaded into memory at the same time"
+    # Only one model ends up resident, matching the documented invariant.
+    assert mgr._llm_loaded_module in ("assistant_a", "assistant_b")

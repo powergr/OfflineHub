@@ -148,12 +148,25 @@
       const T_OPEN_MAP = {{ t('portal.open_map') | tojson }};
       const T_CHAT = {{ t('common.chat') | tojson }};
       const T_OPEN = {{ t('common.open') | tojson }};
+      const T_SEARCH = {{ t('common.search') | tojson }};
       const T_NO_MODULES = {{ t('portal.no_modules', admin_link='<a href="/admin" style="color:inherit">' + t('common.admin_panel') + '</a>') | tojson }};
       const T_ERROR = {{ t('common.error') | tojson }};
       const T_READY = {{ t('common.ready') | tojson }};
 
       const $ = (id) => document.getElementById(id);
       let currentMap = null;
+
+      // A module's name/description can originate from a "custom" Discover
+      // Content download (core/blueprints/admin.py download_custom), whose
+      // title/summary come from the live external Kiwix catalog feed, not
+      // just this app's own fixed strings - escape before it reaches
+      // innerHTML. Building a text node and reading back its escaped HTML
+      // is the standard, reliable way to do this without a library.
+      function escapeHTML(str) {
+        const div = document.createElement("div");
+        div.textContent = str ?? "";
+        return div.innerHTML;
+      }
 
       async function fetchJSON(url) {
         try {
@@ -172,15 +185,31 @@
       function actionFor(id, mod) {
         if (mod.status === "error") return `<button class="open-btn" disabled>${T_UNAVAILABLE}</button>`;
         if (mod.type === "mbtiles") {
-          const safeName = (mod.name || "").replace(/'/g, "\\'");
-          // mod.bounds is always a plain array of 4 numbers (or absent) from
-          // /api/modules - safe to inline as a bare JS literal, no quoting.
-          const boundsArg = Array.isArray(mod.bounds) ? JSON.stringify(mod.bounds) : "null";
-          const maxzoomArg = Number.isFinite(mod.maxzoom) ? mod.maxzoom : "null";
-          return `<button class="open-btn" onclick="openMap('${id}', '${safeName}', '${mod.format}', ${boundsArg}, ${maxzoomArg})">${T_OPEN_MAP} ↗</button>`;
+          // Reads back out via the delegated click listener below (see
+          // "data-open-map" handler) instead of building an onclick="..."
+          // string with mod.name interpolated into it - a name containing
+          // a quote could break out of that attribute regardless of how
+          // carefully a single character got escaped. data-* attributes
+          // go through normal HTML-attribute escaping instead.
+          const boundsAttr = Array.isArray(mod.bounds) ? JSON.stringify(mod.bounds) : "";
+          const maxzoomAttr = Number.isFinite(mod.maxzoom) ? mod.maxzoom : "";
+          return `<button class="open-btn" data-open-map="${escapeHTML(id)}"
+            data-map-name="${escapeHTML(mod.name || "")}" data-map-format="${escapeHTML(mod.format || "")}"
+            data-map-bounds="${escapeHTML(boundsAttr)}" data-map-maxzoom="${escapeHTML(String(maxzoomAttr))}"
+            >${T_OPEN_MAP} ↗</button>`;
         }
         if (mod.type === "llm") {
           return `<a class="open-btn" href="/chat/${encodeURIComponent(id)}">${T_CHAT} ↗</a>`;
+        }
+        if (mod.type === "pdf") {
+          // No wrapping content-page template the way ZIM articles get -
+          // /pdf/<id> serves the raw file straight to the browser's own
+          // built-in PDF viewer, so a separate search link is the only way
+          // back into it beyond opening the whole document cold.
+          return `<span style="display:flex; gap:8px;">
+            <a class="open-btn" href="/pdf/${encodeURIComponent(id)}" target="_blank">${T_OPEN} ↗</a>
+            <a class="open-btn" href="/pdf/${encodeURIComponent(id)}/_search">${T_SEARCH} ↗</a>
+          </span>`;
         }
         return `<a class="open-btn" href="/content/${encodeURIComponent(id)}/" target="_blank">${T_OPEN} ↗</a>`;
       }
@@ -203,10 +232,10 @@
 
           card.innerHTML = `
             <div class="card-header">
-              <span class="card-emoji">${mod.emoji}</span>
-              <span class="card-name">${mod.name}</span>
+              <span class="card-emoji">${escapeHTML(mod.emoji || "")}</span>
+              <span class="card-name">${escapeHTML(mod.name || "")}</span>
             </div>
-            <p class="card-desc">${mod.description || ""}</p>
+            <p class="card-desc">${escapeHTML(mod.description || "")}</p>
             <div class="card-meta">
               <span class="badge ${mod.status === "error" ? "badge-error" : "badge-ready"}">
                 ${mod.status === "error" ? "● " + T_ERROR : "● " + T_READY}
@@ -491,6 +520,20 @@
       }
 
       function closeMap() { $("map-overlay").style.display = "none"; }
+
+      // Delegated once on the container rather than per-card: cards are
+      // rebuilt wholesale by buildCards() (including on the 30s refresh
+      // below), so a per-button listener would need re-wiring every time
+      // anyway. Reads the map's own name/format/bounds/maxzoom back out of
+      // the button's data-* attributes set in actionFor() above.
+      $("cards-container").addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-open-map]");
+        if (!btn) return;
+        let bounds = null;
+        try { bounds = JSON.parse(btn.dataset.mapBounds || "null"); } catch { bounds = null; }
+        const maxzoom = btn.dataset.mapMaxzoom ? Number(btn.dataset.mapMaxzoom) : null;
+        openMap(btn.dataset.openMap, btn.dataset.mapName, btn.dataset.mapFormat, bounds, maxzoom);
+      });
 
       async function init() { await Promise.all([initIP(), buildCards()]); }
       init();

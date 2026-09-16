@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
-from core.downloader import CATALOGUE, Downloader, _friendly_error, refresh_catalogue
+from core.downloader import CATALOGUE, CATEGORIES, Downloader, _friendly_error, refresh_catalogue
 
 
 class FakeResponse:
@@ -395,3 +395,29 @@ def test_refresh_catalogue_is_cached_and_does_not_refetch_every_call():
 
         refresh_catalogue(force=True)  # explicit bypass hits the network again
         assert call_count > first_count
+
+
+def test_every_catalogue_entry_has_a_valid_category():
+    """Regression test for the admin Quick Start category tabs
+    (templates/admin/_download_panel.html): every CATALOGUE entry must
+    carry a "category" that's actually one of CATEGORIES' slugs, or it
+    would silently vanish from every category tab except "All" - no error,
+    just a card nobody using the tabs would ever find."""
+    valid_slugs = {slug for slug, _label_key in CATEGORIES}
+    for key, item in CATALOGUE.items():
+        assert "category" in item, f"{key} is missing a category"
+        assert item["category"] in valid_slugs, f"{key} has an unknown category {item['category']!r}"
+
+
+def test_refresh_catalogue_preserves_category():
+    """refresh_catalogue() merges live url/size into a copy of each
+    CATALOGUE entry (dict(item)) - confirms "category" survives that
+    merge, since the template filters on quickstart[key]["category"], not
+    on the static CATALOGUE dict directly."""
+    resp = Mock()
+    resp.content = b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+    resp.raise_for_status = Mock()
+    with patch("core.downloader.requests.get", return_value=resp):
+        result = refresh_catalogue(force=True)
+    for key, item in CATALOGUE.items():
+        assert result[key]["category"] == item["category"]

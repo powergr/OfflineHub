@@ -370,3 +370,101 @@ def test_generate_stream_serializes_concurrent_callers_and_reports_queue_positio
     # request, and only see its own real tokens after that
     assert results["second"][0] == "[queue] 1"
     assert results["second"][1:] == ["A", "B", "C"]
+
+
+# ── load() caps CPU threads instead of letting onnxruntime default to every
+# core (see _build_config()'s own docstring for the real admin report this
+# fixes: the whole admin panel, not just the chat page, froze solid for the
+# length of a reply). Fakes stand in for og.Config/og.Model/og.Tokenizer.
+
+class _FakeConfig:
+    def __init__(self, model_dir):
+        self.model_dir = model_dir
+        self.overlaid = []
+
+    def overlay(self, json_str):
+        self.overlaid.append(json.loads(json_str))
+
+
+def _threads_arg(cfg: _FakeConfig) -> int:
+    return cfg.overlaid[0]["model"]["decoder"]["session_options"]["intra_op_num_threads"]
+
+
+def test_build_config_leaves_one_core_free(monkeypatch):
+    import core.llm_engine as llm_engine_module
+
+    monkeypatch.setattr(llm_engine_module.os, "cpu_count", lambda: 4)
+
+    class FakeOG:
+        def Config(self, model_dir):
+            return _FakeConfig(model_dir)
+
+    monkeypatch.setattr(llm_engine_module, "og", FakeOG())
+    e = LLMEngine(model_dir="some/dir")
+    cfg = e._build_config()
+    assert cfg.model_dir == "some/dir"
+    assert _threads_arg(cfg) == 3
+
+
+def test_build_config_never_caps_below_one_thread(monkeypatch):
+    import core.llm_engine as llm_engine_module
+
+    monkeypatch.setattr(llm_engine_module.os, "cpu_count", lambda: 1)
+
+    class FakeOG:
+        def Config(self, model_dir):
+            return _FakeConfig(model_dir)
+
+    monkeypatch.setattr(llm_engine_module, "og", FakeOG())
+    e = LLMEngine(model_dir="d")
+    assert _threads_arg(e._build_config()) == 1
+
+
+def test_build_config_handles_unknown_cpu_count(monkeypatch):
+    """os.cpu_count() can return None (documented Python behavior when the
+    count truly can't be determined) - must not crash or pass None through
+    to onnxruntime as a thread count."""
+    import core.llm_engine as llm_engine_module
+
+    monkeypatch.setattr(llm_engine_module.os, "cpu_count", lambda: None)
+
+    class FakeOG:
+        def Config(self, model_dir):
+            return _FakeConfig(model_dir)
+
+    monkeypatch.setattr(llm_engine_module, "og", FakeOG())
+    e = LLMEngine(model_dir="d")
+    assert _threads_arg(e._build_config()) == 3
+
+
+def test_load_passes_a_config_object_to_model_not_a_raw_path(monkeypatch):
+    """Regression test: og.Model() must receive the og.Config built by
+    _build_config() (carrying the thread-count overlay), not the plain
+    model_dir string load() used to pass directly."""
+    import core.llm_engine as llm_engine_module
+
+    monkeypatch.setattr(llm_engine_module.os, "cpu_count", lambda: 8)
+    received = {}
+
+    class FakeOG:
+        def Config(self, model_dir):
+            return _FakeConfig(model_dir)
+
+        def Model(self, cfg):
+            received["cfg"] = cfg
+            return "the-model"
+
+        def Tokenizer(self, model):
+            received["tokenizer_model"] = model
+            return FakeTokenizer()
+
+    monkeypatch.setattr(llm_engine_module, "og", FakeOG())
+    e = LLMEngine(model_dir="d")
+    monkeypatch.setattr(e, "_read_context_length", lambda: 12345)
+    e.load()
+
+    assert isinstance(received["cfg"], _FakeConfig)
+    assert _threads_arg(received["cfg"]) == 7
+    assert received["tokenizer_model"] == "the-model"
+    assert e._model == "the-model"
+    assert e._context_length == 12345

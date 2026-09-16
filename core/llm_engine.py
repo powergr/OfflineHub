@@ -109,9 +109,36 @@ class LLMEngine:
     def load(self):
         if self._model is not None:
             return
-        self._model = og.Model(self._model_dir)
+        self._model = og.Model(self._build_config())
         self._tokenizer = og.Tokenizer(self._model)
         self._context_length = self._read_context_length()
+
+    def _build_config(self):
+        """
+        Caps CPU inference threads instead of letting onnxruntime default to
+        every logical core. Confirmed against the real installed model's own
+        genai_config.json: "session_options": {"provider_options": []} - no
+        thread limit configured at all, so ONNX Runtime's own documented
+        default (intra_op_num_threads = every available core) applies
+        unmodified. That matches a real admin report: the WHOLE admin panel,
+        not just the chat page, froze solid for the entire length of a
+        reply, reproduced from a phone on the hotspot Wi-Fi. The Flask
+        server is already threaded (a request per OS thread), but a thread
+        still needs actual CPU time to run at all - if every core is
+        saturated by onnxruntime's own worker pool for the whole generation,
+        the OS scheduler has nothing left to give the admin panel's threads
+        regardless of how many of them exist.
+
+        Leaves one core free for the OS/Flask rather than a fixed number or
+        a fraction, since a school PC's real core count isn't known ahead of
+        time and this scales correctly whether it's a 2-core machine or 16.
+        """
+        threads = max(1, (os.cpu_count() or 4) - 1)
+        cfg = og.Config(self._model_dir)
+        cfg.overlay(json.dumps({
+            "model": {"decoder": {"session_options": {"intra_op_num_threads": threads}}}
+        }))
+        return cfg
 
     def _read_context_length(self) -> int:
         # Confirmed by checking each catalogue model's own genai_config.json

@@ -29,6 +29,22 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW
 # legacy netsh hosted network. Confirmed live on this machine (192.168.137.1).
 _HOTSPOT_SUBNET_PREFIX = "192.168.137."
 
+
+def _ps_single_quoted(value: str) -> str:
+    """
+    Escapes `value` for safe interpolation inside a PowerShell *single*-
+    quoted string literal ('...'). Inside single quotes, PowerShell treats
+    everything literally except a single quote itself, escaped by doubling
+    it (confirmed against PowerShell's own quoting rules) - so this is the
+    one substitution needed, not a general shell-escaping scheme.
+
+    Security-critical: the SSID/password reach _try_winrt()'s PowerShell
+    script as raw f-string interpolation. Before this helper, a hotspot
+    password containing a single quote could break out of '{pw}' and
+    inject arbitrary PowerShell, run by this already-elevated app.
+    """
+    return value.replace("'", "''")
+
 # Loads the WinRT tethering types and the reflection-based Await helpers
 # PowerShell needs to call their async (IAsyncAction / IAsyncOperation<T>)
 # methods. Verified live against this exact machine's PowerShell 5.1. The
@@ -136,6 +152,18 @@ class HotspotManager:
         return False, f"Mobile Hotspot: {winrt_msg}\n\nLegacy hosted network: {netsh_msg}"
 
     def stop(self):
+        # Skip the actual stop work entirely when the hotspot was never
+        # started. _stop_winrt() alone pays real, unavoidable overhead
+        # every time it runs - a fresh powershell.exe process plus loading
+        # the WinRT tethering assemblies via reflection - even when there
+        # is nothing to tear down, and both it and _stop_netsh() carry
+        # multi-second subprocess timeouts (14s, 8s) on top of that if
+        # something hangs. quit_app() (main.py) calls this unconditionally
+        # on every single Quit, hotspot enabled or not, so without this
+        # guard that cost lands on every quit and can eat most of the
+        # 25-second watchdog's budget for work that has nothing to do.
+        if not self._running:
+            return
         self._stop_winrt()
         self._stop_netsh()
         self._running = False
@@ -225,8 +253,8 @@ try {{
 
     $mgr = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager]::CreateFromConnectionProfile($internet)
     $cfg = $mgr.GetCurrentAccessPointConfiguration()
-    $cfg.Ssid = '{ssid}'
-    $cfg.Passphrase = '{pw}'
+    $cfg.Ssid = '{_ps_single_quoted(ssid)}'
+    $cfg.Passphrase = '{_ps_single_quoted(pw)}'
     Await-Action ($mgr.ConfigureAccessPointAsync($cfg))
 
     $resultType = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringOperationResult]

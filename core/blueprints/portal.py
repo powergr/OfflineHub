@@ -4,7 +4,9 @@ what students connect to over the hotspot. Serves ZIM content in-process
 (no kiwix-serve subprocess), map tiles from mbtiles, and the LLM chat UI.
 """
 
-from flask import Blueprint, Response, abort, current_app, jsonify, redirect, render_template, request, url_for
+import re
+
+from flask import Blueprint, Response, abort, current_app, jsonify, redirect, render_template, request, send_file, url_for
 
 from core.retrieval import retrieve
 
@@ -162,11 +164,104 @@ def content_page(module_id, zim_path):
     if target is not None:
         return redirect(url_for("portal.content_page", module_id=module_id, zim_path=target))
 
+    # Video/audio entries need real HTTP Range support to be seekable and to
+    # start playing before the whole file has downloaded - confirmed live to
+    # matter: without this, resolve() always returned the entire entry in
+    # one response with no Accept-Ranges/206 handling at all, so a browser
+    # could only force-download a multi-minute video before it would play,
+    # and every simultaneous viewer re-downloaded the whole file over the
+    # hotspot. A plain GET (no Range header) still gets the full response;
+    # this only changes what happens when a client actually asks for one.
+    range_header = request.headers.get("Range")
+    if range_header:
+        response = _serve_zim_range(reader, zim_path, range_header)
+        if response is not None:
+            return response
+        abort(404)
+
     result = reader.resolve(zim_path)
     if result is None:
         abort(404)
     content, mimetype = result
-    return Response(content, mimetype=mimetype)
+    response = Response(content, mimetype=mimetype)
+    response.headers["Accept-Ranges"] = "bytes"
+    return response
+
+
+_RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)$")
+
+
+def _serve_zim_range(reader, zim_path, range_header):
+    """Parses one "bytes=start-end" Range header (including an open end
+    like "bytes=500-" and a suffix range like "bytes=-500") and returns the
+    matching 206 Partial Content (or 416) response, or None if zim_path
+    doesn't resolve to a real entry at all."""
+    info = reader.entry_info(zim_path)
+    if info is None:
+        return None
+    total, mimetype = info
+
+    match = _RANGE_RE.match(range_header)
+    if match is None:
+        return _range_not_satisfiable(total)
+    start_s, end_s = match.groups()
+
+    if start_s == "":
+        if end_s == "":
+            return _range_not_satisfiable(total)
+        length = min(int(end_s), total)
+        start, end = total - length, total - 1
+    else:
+        start = int(start_s)
+        end = int(end_s) if end_s else total - 1
+        end = min(end, total - 1)
+
+    if total == 0 or start >= total or start > end:
+        return _range_not_satisfiable(total)
+
+    chunk = reader.resolve_range(zim_path, start, end)
+    response = Response(chunk, status=206, mimetype=mimetype)
+    response.headers["Content-Range"] = f"bytes {start}-{end}/{total}"
+    response.headers["Accept-Ranges"] = "bytes"
+    response.headers["Content-Length"] = str(len(chunk))
+    return response
+
+
+def _range_not_satisfiable(total):
+    response = Response(status=416)
+    response.headers["Content-Range"] = f"bytes */{total}"
+    return response
+
+
+# ── PDF content (a teacher's own uploaded material, plan.md Phase 6 item 24) ──
+
+@bp.route("/pdf/<module_id>")
+def pdf_view(module_id):
+    """
+    Serves the raw PDF straight to the browser's own built-in PDF viewer -
+    no custom rendering here at all, unlike ZIM content. send_file() also
+    gets real HTTP Range support for free (Werkzeug implements it), so
+    seeking a large PDF still works exactly like it should.
+    """
+    try:
+        reader = _module_mgr().get_pdf_reader(module_id)
+    except Exception:
+        abort(404)
+    _usage().record_open(module_id)
+    return send_file(reader.path, mimetype="application/pdf")
+
+
+@bp.route("/pdf/<module_id>/_search")
+def pdf_search(module_id):
+    try:
+        reader = _module_mgr().get_pdf_reader(module_id)
+    except Exception:
+        abort(404)
+    query = request.args.get("q", "")
+    results = reader.search(query) if query.strip() else []
+    return render_template(
+        "portal/pdf_search.html", module_id=module_id, query=query, results=results,
+    )
 
 
 # ── Map tiles (unchanged approach: read straight from the mbtiles sqlite file) ─

@@ -3,8 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="csrf-token" content="{{ csrf_token() }}" />
     <title>{% block title %}{{ t('common.admin') }}{% endblock %} - {{ t('app.brand_short') }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <script>
+      // Attaches the CSRF token to every non-GET fetch() call made from any
+      // admin page, so none of the many fetch() call sites across
+      // _download_panel.html/modules.html had to be edited individually -
+      // one choke point instead of a dozen easy-to-miss ones.
+      (function () {
+        const token = document.querySelector('meta[name="csrf-token"]').content;
+        const realFetch = window.fetch;
+        window.fetch = function (input, init) {
+          init = init || {};
+          const method = (init.method || "GET").toUpperCase();
+          if (method !== "GET" && method !== "HEAD") {
+            const headers = new Headers(init.headers || {});
+            headers.set("X-CSRF-Token", token);
+            init = { ...init, headers };
+          }
+          return realFetch(input, init);
+        };
+      })();
+    </script>
     <style>
       .shell { display: flex; min-height: 100vh; }
 

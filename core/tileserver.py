@@ -96,12 +96,31 @@ class TileServer:
         files   = glob.glob(pattern, recursive=True)
         return files[0] if files else None
 
+    def close(self, module: str):
+        """
+        Closes and forgets this one module's cached connection, if any.
+        Must be called before its .mbtiles file is deleted - confirmed
+        real: ModuleManager.remove() used to only call registry.unload()
+        (a no-op for mbtiles modules, which register with handle=None
+        since TileServer keeps its own separate connection cache), so
+        removing a map that had ever been viewed left its sqlite
+        connection open and rmtree() hit a Windows PermissionError on the
+        still-locked file.
+        """
+        conn = self._connections.pop(module, None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     def close_all(self):
         for conn in self._connections.values():
             try:
                 conn.close()
             except Exception:
                 pass
+        self._connections.clear()
         self._connections.clear()
 
 
