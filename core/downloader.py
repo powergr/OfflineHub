@@ -365,9 +365,15 @@ _FALLBACK_URLS = {
 # last; "assistant_phi4_mini" is flagged recommended as the best quality/size
 # tradeoff for a typical PC (~5GB disk, 8GB+ RAM). The Qwen2.5 0.5B option
 # was removed - answers were too weak to be useful in practice.
+#
+# "min_ram_gb" and "min_score" feed core/benchmark.py's PC check. min_ram_gb
+# is total RAM the model needs to run comfortably. min_score (0-100) keeps the
+# slowest model off weaker PCs even when they have enough RAM.
 
 LLM_CATALOGUE: dict[str, dict] = {
     "assistant_phi3_mini": {
+        "min_ram_gb":  6,
+        "min_score":   0,
         "name":        "Offline Assistant: Phi-3-mini 3.8B (~2.7 GB)",
         "emoji":       "🤖",
         "description": "Noticeably smarter than the 0.5B model at a modest size. A good "
@@ -383,6 +389,8 @@ LLM_CATALOGUE: dict[str, dict] = {
         ],
     },
     "assistant_phi4_mini": {
+        "min_ram_gb":  8,
+        "min_score":   30,
         "name":        "Offline Assistant: Phi-4-mini 3.8B (~4.9 GB, recommended)",
         "emoji":       "⭐",
         "description": "Newer and noticeably better quality than Phi-3-mini at a similar "
@@ -397,6 +405,8 @@ LLM_CATALOGUE: dict[str, dict] = {
         ],
     },
     "assistant_phi3_medium": {
+        "min_ram_gb":  24,
+        "min_score":   70,
         "name":        "Offline Assistant: Phi-3-medium 14B (~9.3 GB, largest)",
         "emoji":       "🏋️",
         "description": "The best answer quality of these options, but needs a capable "

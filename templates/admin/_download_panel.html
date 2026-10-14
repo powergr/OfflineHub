@@ -51,6 +51,15 @@
 <section class="tab-panel" data-tab="llm">
 <div class="section-title" style="margin-top:0">🤖 {{ t('download_panel.tab_llm') }}</div>
 <p class="muted" style="margin-bottom: 14px;">{{ t('download_panel.llm_desc') }}</p>
+<div class="card bench-card" id="bench-card">
+  <div class="dl-card-head">
+    <span class="dl-emoji">⏱️</span>
+    <span class="dl-name">{{ t('download_panel.bench_title') }}</span>
+  </div>
+  <p class="dl-desc">{{ t('download_panel.bench_desc') }}</p>
+  <button type="button" class="btn" id="bench-btn" onclick="runBenchmark()">{{ t('download_panel.bench_button') }}</button>
+  <div id="bench-result" style="display:none"></div>
+</div>
 <div class="grid" id="llm-list">
   {% for key, item in (llm_catalogue | default({})).items() %}
   <div class="card dl-card" id="llm-row-{{ key }}">
@@ -60,6 +69,7 @@
     </div>
     <p class="dl-desc">{{ item.description }}</p>
     <div class="dl-meta">{{ (item.size / 1073741824) | round(1) }} GB</div>
+    <div class="bench-note" id="llm-note-{{ key }}" hidden></div>
     <div class="progress" id="llm-progress-{{ key }}" style="display:none"><div></div></div>
     {% if key in (installed_keys | default([])) %}
       <button class="btn secondary" disabled>✓ {{ t('common.installed') }}</button>
@@ -126,6 +136,10 @@
   .dl-card > .btn, .dl-card > button { margin-top: 14px; width: 100%; }
   .bundle-card { border-color: var(--accent2); margin-bottom: 18px; }
   .category-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .bench-card { margin-bottom: 14px; }
+  .bench-score { font-size: 18px; font-weight: 600; margin: 10px 0 4px; }
+  .bench-note { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  .bench-note.bench-ok { color: var(--accent2); font-weight: 600; }
   .category-tab {
     padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border);
     background: var(--surface2); color: var(--muted); font-weight: 600;
@@ -145,6 +159,25 @@
   const T_SEARCHING = "{{ t('download_panel.searching') | e }}";
   const T_NO_RESULTS = "{{ t('download_panel.no_results') | e }}";
   const T_ARTICLES = "{{ t('download_panel.articles') | e }}";
+  const T_BENCH_BUTTON = "{{ t('download_panel.bench_button') | e }}";
+  const T_BENCH_RUNNING = "{{ t('download_panel.bench_running') | e }}";
+  const T_BENCH_FAILED = "{{ t('download_panel.bench_failed') | e }}";
+  const T_BENCH_SCORE = "{{ t('download_panel.bench_score') | e }}";
+  const T_BENCH_SUMMARY = "{{ t('download_panel.bench_summary') | e }}";
+  const T_BENCH_REC = "{{ t('download_panel.bench_recommended') | e }}";
+  const T_BENCH_NONE = "{{ t('download_panel.bench_none') | e }}";
+  const T_BENCH_RAM_UNKNOWN = "{{ t('download_panel.bench_ram_unknown') | e }}";
+  const T_BENCH_NOTE = "{{ t('download_panel.bench_note') | e }}";
+  const T_BENCH_TIERS = {
+    basic: "{{ t('download_panel.bench_tier_basic') | e }}",
+    good: "{{ t('download_panel.bench_tier_good') | e }}",
+    strong: "{{ t('download_panel.bench_tier_strong') | e }}",
+  };
+  const T_BENCH_BLOCKERS = {
+    ram: "{{ t('download_panel.bench_blocker_ram') | e }}",
+    disk: "{{ t('download_panel.bench_blocker_disk') | e }}",
+    score: "{{ t('download_panel.bench_blocker_score') | e }}",
+  };
 
   // Text inserted into innerHTML below (search result titles/summaries,
   // country names) can originate from a live external source (the Kiwix
@@ -276,6 +309,56 @@
           }
         });
       });
+  }
+
+  // PC check (core/benchmark.py). Everything it returns is a number or a
+  // fixed code, and it is written with textContent, never innerHTML.
+  function runBenchmark() {
+    const btn = document.getElementById("bench-btn");
+    const out = document.getElementById("bench-result");
+    btn.disabled = true;
+    btn.textContent = T_BENCH_RUNNING;
+    fetch("/admin/benchmark/run", { method: "POST" })
+      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((d) => {
+        out.replaceChildren();
+        const head = document.createElement("div");
+        head.className = "bench-score";
+        head.textContent = `${T_BENCH_SCORE}: ${d.score}/100 (${T_BENCH_TIERS[d.tier] || d.tier})`;
+        const sum = document.createElement("p");
+        sum.className = "dl-desc";
+        sum.textContent = T_BENCH_SUMMARY
+          .replace("{ram}", d.total_ram_gb).replace("{cores}", d.cores)
+          .replace("{disk}", d.free_disk_gb).replace("{speed}", d.copy_gbps);
+        out.append(head, sum);
+        const extra = [];
+        if (!d.ram_known) extra.push(T_BENCH_RAM_UNKNOWN);
+        if (!d.recommended) extra.push(T_BENCH_NONE);
+        extra.push(T_BENCH_NOTE);
+        for (const line of extra) {
+          const p = document.createElement("p");
+          p.className = "muted";
+          p.textContent = line;
+          out.append(p);
+        }
+        out.style.display = "block";
+
+        for (const [key, info] of Object.entries(d.models)) {
+          const note = document.getElementById(`llm-note-${key}`);
+          if (!note) continue;
+          note.classList.toggle("bench-ok", key === d.recommended);
+          if (key === d.recommended) {
+            note.textContent = "✓ " + T_BENCH_REC;
+          } else if (info.blockers.length) {
+            note.textContent = info.blockers.map((b) => T_BENCH_BLOCKERS[b] || b).join(" ");
+          } else {
+            note.textContent = "";
+          }
+          note.hidden = !note.textContent;
+        }
+      })
+      .catch(() => { alert(T_BENCH_FAILED); })
+      .finally(() => { btn.disabled = false; btn.textContent = T_BENCH_BUTTON; });
   }
 
   function startLLM(key) {

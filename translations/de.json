@@ -210,5 +210,22 @@
   "flash.settings_saved": "Einstellungen gespeichert.",
   "flash.autostart_failed": "Autostart konnte nicht registriert werden: {error}",
   "modules.opens_count": "{count}-mal geöffnet",
-  "modules.opens_tooltip": "Wie oft Schüler dieses Modul geöffnet haben (nur aggregierte Anzahl - keine Verfolgung einzelner Schüler)."
+  "modules.opens_tooltip": "Wie oft Schüler dieses Modul geöffnet haben (nur aggregierte Anzahl - keine Verfolgung einzelner Schüler).",
+  "download_panel.bench_title": "Diesen PC prüfen",
+  "download_panel.bench_desc": "Dauert wenige Sekunden. Misst die Speichergeschwindigkeit und zeigt, welcher Assistent zu diesem Computer passt.",
+  "download_panel.bench_button": "PC-Check starten",
+  "download_panel.bench_running": "Prüfe...",
+  "download_panel.bench_failed": "Der PC-Check ist fehlgeschlagen.",
+  "download_panel.bench_score": "PC-Wertung",
+  "download_panel.bench_summary": "{ram} GB RAM, {cores} CPU-Kerne, {disk} GB freier Speicherplatz, Speichergeschwindigkeit {speed} GB/s.",
+  "download_panel.bench_recommended": "Für diesen PC empfohlen",
+  "download_panel.bench_none": "Dieser PC liegt unter dem Minimum für den Assistenten. Wikipedia und andere Inhalte funktionieren weiterhin gut.",
+  "download_panel.bench_ram_unknown": "Die RAM-Größe konnte nicht gelesen werden. Prüfen Sie die Anforderungen jedes Modells von Hand.",
+  "download_panel.bench_note": "Das ist eine Orientierung, kein Versprechen. Die echte Geschwindigkeit hängt davon ab, was der PC sonst ausführt.",
+  "download_panel.bench_tier_basic": "Einfach",
+  "download_panel.bench_tier_good": "Gut",
+  "download_panel.bench_tier_strong": "Stark",
+  "download_panel.bench_blocker_ram": "Braucht mehr RAM, als dieser PC hat.",
+  "download_panel.bench_blocker_disk": "Nicht genug freier Speicherplatz.",
+  "download_panel.bench_blocker_score": "Auf diesem PC wahrscheinlich zu langsam."
 }

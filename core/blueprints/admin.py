@@ -25,12 +25,14 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 from core.auth import generate_salt, hash_password, verify_password
+from core.benchmark import run_benchmark
 from core.downloader import (
     CATALOGUE, CATEGORIES, LLM_CATALOGUE, MAPS_CATALOGUE, STARTER_BUNDLE_KEYS, CatalogueError,
     llm_download_plan, resolve_catalogue_entry, search_catalogue,
 )
 from core.i18n import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, translate
 from core.module_manager import MODULES_DIR
+import core.module_manager as module_manager_module
 from core.version import get_version
 from core import hotspot as hotspot_module
 
@@ -49,7 +51,7 @@ _SETUP_DOWNLOAD_ENDPOINTS = {
     "admin.setup", "admin.setup_finish",
     "admin.download_quickstart", "admin.download_search",
     "admin.download_custom", "admin.download_llm", "admin.download_map",
-    "admin.download_bundle", "admin.download_status",
+    "admin.download_bundle", "admin.download_status", "admin.benchmark_run",
 }
 
 _MAX_ATTEMPTS = 5
@@ -610,6 +612,12 @@ def download_llm():
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id})
+
+
+@bp.route("/benchmark/run", methods=["POST"])
+def benchmark_run():
+    """Quick PC check (core/benchmark.py): score plus which assistant fits."""
+    return jsonify(run_benchmark(LLM_CATALOGUE, module_manager_module.MODULES_DIR))
 
 
 @bp.route("/downloads/map", methods=["POST"])

@@ -210,5 +210,22 @@
   "flash.settings_saved": "Settings saved.",
   "flash.autostart_failed": "Could not register autostart: {error}",
   "modules.opens_count": "{count} opens",
-  "modules.opens_tooltip": "How many times students have opened this module (aggregate count only - no per-student tracking)."
+  "modules.opens_tooltip": "How many times students have opened this module (aggregate count only - no per-student tracking).",
+  "download_panel.bench_title": "Check This PC",
+  "download_panel.bench_desc": "Takes a few seconds. Tests memory speed and shows which assistant fits this computer.",
+  "download_panel.bench_button": "Run PC Check",
+  "download_panel.bench_running": "Checking...",
+  "download_panel.bench_failed": "The PC check failed.",
+  "download_panel.bench_score": "PC score",
+  "download_panel.bench_summary": "{ram} GB RAM, {cores} CPU cores, {disk} GB free disk, memory speed {speed} GB/s.",
+  "download_panel.bench_recommended": "Recommended for this PC",
+  "download_panel.bench_none": "This PC is below the minimum for the assistant. Wikipedia and other content still work well.",
+  "download_panel.bench_ram_unknown": "The RAM size could not be read. Check each model's needs by hand.",
+  "download_panel.bench_note": "This is a guide, not a promise. Real speed depends on what else the PC is running.",
+  "download_panel.bench_tier_basic": "Basic",
+  "download_panel.bench_tier_good": "Good",
+  "download_panel.bench_tier_strong": "Strong",
+  "download_panel.bench_blocker_ram": "Needs more RAM than this PC has.",
+  "download_panel.bench_blocker_disk": "Not enough free disk space.",
+  "download_panel.bench_blocker_score": "Likely too slow on this PC."
 }

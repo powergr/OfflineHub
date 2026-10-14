@@ -210,5 +210,22 @@
   "flash.settings_saved": "Configuración guardada.",
   "flash.autostart_failed": "No se pudo registrar el inicio automático: {error}",
   "modules.opens_count": "{count} aperturas",
-  "modules.opens_tooltip": "Cuántas veces los estudiantes han abierto este módulo. Solo un recuento agregado, sin seguimiento por estudiante."
+  "modules.opens_tooltip": "Cuántas veces los estudiantes han abierto este módulo. Solo un recuento agregado, sin seguimiento por estudiante.",
+  "download_panel.bench_title": "Revisar Este Equipo",
+  "download_panel.bench_desc": "Tarda unos segundos. Mide la velocidad de la memoria y muestra qué asistente encaja en este equipo.",
+  "download_panel.bench_button": "Revisar el Equipo",
+  "download_panel.bench_running": "Revisando...",
+  "download_panel.bench_failed": "La revisión del equipo falló.",
+  "download_panel.bench_score": "Puntuación del equipo",
+  "download_panel.bench_summary": "{ram} GB de RAM, {cores} núcleos de CPU, {disk} GB de disco libre, velocidad de memoria {speed} GB/s.",
+  "download_panel.bench_recommended": "Recomendado para este equipo",
+  "download_panel.bench_none": "Este equipo está por debajo del mínimo para el asistente. Wikipedia y otros contenidos siguen funcionando bien.",
+  "download_panel.bench_ram_unknown": "No se pudo leer la cantidad de RAM. Revise a mano lo que necesita cada modelo.",
+  "download_panel.bench_note": "Es una guía, no una promesa. La velocidad real depende de qué más esté ejecutando el equipo.",
+  "download_panel.bench_tier_basic": "Básico",
+  "download_panel.bench_tier_good": "Bueno",
+  "download_panel.bench_tier_strong": "Potente",
+  "download_panel.bench_blocker_ram": "Necesita más RAM de la que tiene este equipo.",
+  "download_panel.bench_blocker_disk": "No hay suficiente espacio libre en disco.",
+  "download_panel.bench_blocker_score": "Probablemente demasiado lento en este equipo."
 }

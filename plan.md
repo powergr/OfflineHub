@@ -46,7 +46,7 @@
 10. ✅ **More content variety.** Done. Added Spanish/French Wikipedia and
     Vikidia, and English History/Mathematics/Chemistry ZIMs. All were
     live-verified against the real Kiwix catalog.
-13. ✅ **A content-refresh story.** Done. Installed modules record their
+11. ✅ **A content-refresh story.** Done. Installed modules record their
     source URL. The Modules page flags a "🔄 Newer version available"
     badge and offers a one-click re-download-in-place.
 
@@ -145,12 +145,12 @@ from memory or an old list.
     itself called for turned up a real blocker, and that got fixed first.
     `core/zim_reader.py`'s `resolve()` always returned `bytes(item.content)`
     - the whole item, fully materialized - and `portal.py`'s
-    `content_page()` wrapped that in a plain `Response` with no
-    `Accept-Ranges`/206 support. Confirmed by reading both, not assumed.
-    A video entry could never be seeked, and a multi-minute talk would
-    have had to fully download before playback could even start - the
-    "not smooth at classroom scale" risk this item flagged, confirmed as
-    a real, specific gap rather than a guess.
+      `content_page()` wrapped that in a plain `Response` with no
+      `Accept-Ranges`/206 support. Confirmed by reading both, not assumed.
+      A video entry could never be seeked, and a multi-minute talk would
+      have had to fully download before playback could even start - the
+      "not smooth at classroom scale" risk this item flagged, confirmed as
+      a real, specific gap rather than a guess.
 
     Added real HTTP Range support: `ZimReader.entry_info()` gets an
     entry's size/mimetype without reading its content, and
@@ -172,8 +172,18 @@ from memory or an old list.
     conference talks) to `CATALOGUE`, confirmed live via
     `resolve_catalogue_entry()` (~5.7GB). Other TED topic slices are
     real catalogue entries too, reachable via Discover Content.
-24. **Let a school upload its own material.** Scoped: PDF only, with
-    full-text search. Still to build.
+
+24. ✅ **Let a school upload its own material.** Done. PDF only, with
+    full-text search. Manual Install accepts `.pdf`. `core/pdf_reader.py`
+    pulls each page's text once with pypdf (pure Python). The portal serves
+    the raw file to the browser's own viewer at `/pdf/<id>`, and
+    `/pdf/<id>/_search` lists matching pages. Reader tests already existed.
+    Added route-level tests (`tests/test_portal_pdf.py`) driving a real Flask
+    app: the file is served byte for byte, search links to the right page, and
+    unknown or traversal ids return 404.
+
+    Known limit: a scanned PDF with no text layer is viewable but not
+    searchable, since there is no OCR.
 
 ## Phase 7: Fixes from real use
 
@@ -283,29 +293,29 @@ from memory or an old list.
     then a retry failed with a locked-file error.** Done. A real Cyprus
     extraction hit `HTTPSConnectionPool: Read timed out` after 30
     minutes, and retrying hit `WinError 32: The process cannot access
-    the file`. Two real bugs in `core/map_extract.py`: a long extraction
+the file`. Two real bugs in `core/map_extract.py`: a long extraction
     fires thousands of individual HTTP range requests against a public
     server with no retry at all, so a single transient timeout aborted
     the entire job; and the destination sqlite connection was only ever
     closed on the success path, so that same failed attempt left the
     file locked, and the retry's own cleanup of it failed.
 
-    Fixed both: each HTTP request now retries with backoff, a tile that
-    still fails after retries is tracked and skipped rather than killing
-    the whole extraction (unless too many fail, which still raises
-    instead of silently installing a mostly-blank map), and the
-    connection is always closed and the partial file removed on any
-    failure, so a retry starts clean. Verified with new tests that
-    reproduce the exact failure-then-retry sequence, not just the happy
-    path; 156-test suite passes.
+        Fixed both: each HTTP request now retries with backoff, a tile that
+        still fails after retries is tracked and skipped rather than killing
+        the whole extraction (unless too many fail, which still raises
+        instead of silently installing a mostly-blank map), and the
+        connection is always closed and the partial file removed on any
+        failure, so a retry starts clean. Verified with new tests that
+        reproduce the exact failure-then-retry sequence, not just the happy
+        path; 156-test suite passes.
 
 29. ✅ **Choosing "keep" on the modules prompt during uninstall deleted
     the whole app folder anyway.** Done. Found from a real report right
-    after item 26/27 shipped - the fix for the *previous* uninstall bug
+    after item 26/27 shipped - the fix for the _previous_ uninstall bug
     still didn't actually honor "keep." Root-caused with an instrumented
     test build of the installer script (real Inno Setup, not guessed):
     it proved `[UninstallDelete]`'s `Check:` function is evaluated
-    *before* `InitializeUninstall()` even runs, so `ShouldDeleteModules()`
+    _before_ `InitializeUninstall()` even runs, so `ShouldDeleteModules()`
     always read `KeepModules` at its uninitialized default (false) and
     always deleted the modules folder, regardless of what the admin
     actually answered. The prompt itself worked; the answer just came
@@ -318,7 +328,7 @@ from memory or an old list.
     `InitializeUninstall()` has already recorded the real answer.
     Verified against the actual compiled uninstaller end to end, not
     just read through: an instrumented test install proved the old code
-    called `ShouldDeleteModules()` and got a delete decision *before*
+    called `ShouldDeleteModules()` and got a delete decision _before_
     `InitializeUninstall()` ever ran, then confirmed the fix keeps real
     module content and the app folder itself on "keep," and still
     removes everything on "delete" - both against a real install/
@@ -331,7 +341,7 @@ from memory or an old list.
 
     Measured live against the real Protomaps server, not guessed: a real
     680-tile extraction timed at concurrency 4, 8, 16, 48, and 96 showed
-    throughput flat at ~9-10 tiles/sec across *all* of them - a server-
+    throughput flat at ~9-10 tiles/sec across _all_ of them - a server-
     side rate limit, not something more client concurrency can beat -
     while per-request latency got dramatically worse at high concurrency
     (mean 1.08s at 16 threads vs. 5.14s, max 18.1s, at 96 threads) for
@@ -465,7 +475,7 @@ from memory or an old list.
     The two most serious, chained together: `/admin/setup/finish`
     (`core/blueprints/admin.py`) was permanently exempt from every auth
     check, not just during first-run, so anyone on the hotspot Wi-Fi
-    could silently reset the admin password *and* the hotspot password
+    could silently reset the admin password _and_ the hotspot password
     with zero credentials - and that hotspot password then got
     f-string-interpolated unescaped into a PowerShell script
     (`core/hotspot.py`'s `_try_winrt`) run by this already-elevated app,
@@ -558,5 +568,40 @@ from memory or an old list.
     `modules_remove()` - fixed by having `remove()` resolve the module
     path itself instead of the caller constructing one. 229-test suite
     passes (25 new tests).
+
+35. ✅ **PC check: a benchmark score and a suggested assistant model.**
+    Done. Compared against Project N.O.M.A.D. (Crosstalk Solutions), read
+    from its GitHub README. Its benchmark is described only by name there
+    (hardware scoring, Builder Tags, community leaderboard), so this copies
+    the idea, not the method.
+
+    `core/benchmark.py` reads total and free RAM (Windows
+    `GlobalMemoryStatusEx` via ctypes), CPU cores, and free disk on the
+    modules drive. It times a 64MB in-memory copy, best of three. No new
+    dependency. Memory speed matters because a CPU reads the whole model
+    from RAM for every word it writes. The score is RAM 50%, memory speed
+    30%, cores 20%, each mapped through a reasoned curve.
+
+    Each `LLM_CATALOGUE` entry now has `min_ram_gb` and `min_score`
+    (6/0, 8/30, 24/70). A model is blocked by `ram`, `disk` (size x 1.25
+    free), or `score`. The recommendation is the largest unblocked model.
+    `POST /admin/benchmark/run` returns the result. The Offline Assistant
+    tab has a "Run PC Check" button, a badge on the recommended card, and a
+    short reason on blocked ones. Strings are in all 4 translation files.
+
+    Verified: 255 tests pass (26 new). On this dev PC (15.7GB, 16 cores) it
+    scores 70 to 72 and recommends Phi-4-mini. The rendered page's real JS
+    was run in node against fake DOM elements fed by the real route's JSON.
+
+    Honest limits: the curve points and `min_score` values are estimates,
+    not calibrated against measured tokens per second. The installed models
+    live outside the folders this session may access, so no real inference
+    timing was taken. The score can move a few points between runs.
+    RAM and disk rules come from the catalogue's own stated needs.
+
+    Gaps seen in N.O.M.A.D. that could suit us later (not built): chat that
+    answers from the school's uploaded documents (we search PDFs but the
+    assistant does not read them), Khan Academy style courses with progress
+    tracking, and a first-run wizard with curated content collections.
 
 ---

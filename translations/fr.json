@@ -210,5 +210,22 @@
   "flash.settings_saved": "Paramètres enregistrés.",
   "flash.autostart_failed": "Impossible d'enregistrer le démarrage automatique : {error}",
   "modules.opens_count": "{count} ouvertures",
-  "modules.opens_tooltip": "Combien de fois les élèves ont ouvert ce module. Seulement un total agrégé, sans suivi par élève."
+  "modules.opens_tooltip": "Combien de fois les élèves ont ouvert ce module. Seulement un total agrégé, sans suivi par élève.",
+  "download_panel.bench_title": "Vérifier Cet Ordinateur",
+  "download_panel.bench_desc": "Prend quelques secondes. Teste la vitesse de la mémoire et indique quel assistant convient à cet ordinateur.",
+  "download_panel.bench_button": "Lancer la Vérification",
+  "download_panel.bench_running": "Vérification...",
+  "download_panel.bench_failed": "La vérification de l'ordinateur a échoué.",
+  "download_panel.bench_score": "Score de l'ordinateur",
+  "download_panel.bench_summary": "{ram} Go de RAM, {cores} cœurs de processeur, {disk} Go de disque libre, vitesse mémoire {speed} Go/s.",
+  "download_panel.bench_recommended": "Recommandé pour cet ordinateur",
+  "download_panel.bench_none": "Cet ordinateur est sous le minimum requis pour l'assistant. Wikipédia et les autres contenus fonctionnent toujours bien.",
+  "download_panel.bench_ram_unknown": "La taille de la RAM n'a pas pu être lue. Vérifiez à la main les besoins de chaque modèle.",
+  "download_panel.bench_note": "C'est un repère, pas une promesse. La vitesse réelle dépend de ce que l'ordinateur exécute d'autre.",
+  "download_panel.bench_tier_basic": "Basique",
+  "download_panel.bench_tier_good": "Bon",
+  "download_panel.bench_tier_strong": "Puissant",
+  "download_panel.bench_blocker_ram": "Demande plus de RAM que cet ordinateur n'en a.",
+  "download_panel.bench_blocker_disk": "Pas assez d'espace disque libre.",
+  "download_panel.bench_blocker_score": "Probablement trop lent sur cet ordinateur."
 }

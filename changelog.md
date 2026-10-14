@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Unreleased
+
+- Added a PC check to the Offline Assistant tab. One button reads RAM, CPU
+  cores, and free disk space. It also times a short memory test. The result is
+  a 0 to 100 score and a recommended assistant model for that PC. Models the PC
+  cannot run show a short reason, such as not enough RAM. The score is a rough
+  guide, not a measured speed.
+- Added route tests for the PDF upload feature. They cover viewing, search,
+  unknown modules, and path traversal attempts.
+
 ## 0.3.1
 
 - Added nine Quick Start items: five programming reference ZIMs, MedlinePlus,
