@@ -51,12 +51,17 @@ jobs:
           }
           Get-Item "Output\OfflineHub_Setup.exe" | Select-Object Name, Length
 
+      # Only for a run started by hand. A tag push publishes the same file as a
+      # release asset, and artifacts count against Actions storage, so they
+      # are kept for a few days only.
       - name: Upload installer as a build artifact
+        if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
           name: OfflineHub_Setup
           path: Output\OfflineHub_Setup.exe
           if-no-files-found: error
+          retention-days: 3
 
       - name: Read app version
         id: version
